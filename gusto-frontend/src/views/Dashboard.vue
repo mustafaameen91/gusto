@@ -4,7 +4,7 @@
       <!-- Top stat row (like reference: 4 cards, first highlighted) -->
       <div class="db-top">
         <!-- Primary card (highlighted, like "2100 TOTAL SESSIONS") -->
-        <div class="db-kpi db-kpi--primary" v-if="hasRole(['admin', 'cashier'])">
+        <div class="db-kpi db-kpi--primary" v-if="hasRole(['admin', 'supervisor', 'cashier'])">
           <div class="db-kpi__head">
             <span class="db-kpi__num">{{ Number(stats.todaySales || 0).toLocaleString() }}</span>
             <span class="db-kpi__badge db-kpi__badge--up">
@@ -21,7 +21,7 @@
           </div>
         </div>
 
-        <div class="db-kpi" v-if="hasRole(['admin', 'kitchen', 'cashier'])">
+        <div class="db-kpi" v-if="hasRole(['admin', 'supervisor', 'kitchen', 'cashier'])">
           <span class="db-kpi__num">{{ stats.activeOrders }}</span>
           <span class="db-kpi__label">طلبات نشطة</span>
           <span class="db-kpi__trend db-kpi__trend--blue">
@@ -54,7 +54,7 @@
             <h3 class="db-panel__title">آخر الطلبات</h3>
             <span class="db-panel__sub">{{ currentDate }}</span>
           </div>
-          <div class="db-panel__body" v-if="hasRole(['admin', 'kitchen', 'cashier'])">
+          <div class="db-panel__body" v-if="hasRole(['admin', 'supervisor', 'kitchen', 'cashier'])">
             <v-data-table
               :headers="orderHeaders"
               :items="recentOrders"
@@ -144,7 +144,7 @@
                 </div>
                 <span class="db-stat-row__val val--violet">{{ Number(stats.profitSinceOpening || 0).toLocaleString() }} <small>د.ع</small></span>
               </div>
-              <div class="db-stat-row" v-if="hasRole(['admin', 'cashier'])">
+              <div class="db-stat-row" v-if="hasRole(['admin', 'supervisor', 'cashier'])">
                 <div class="db-stat-row__info">
                   <span class="db-stat-row__label">رصيد الصندوق</span>
                 </div>
@@ -160,7 +160,7 @@
 
       <!-- Bottom: Quick actions row (like reference bottom platform cards) -->
       <div class="db-bottom">
-        <div class="db-action" v-if="hasRole(['admin', 'cashier'])" @click="$router.push('/cashier')">
+        <div class="db-action" v-if="hasRole(['admin', 'supervisor', 'cashier'])" @click="$router.push('/cashier')">
           <div class="db-action__icon db-action__icon--green">
             <PhCurrencyDollar :size="22" weight="duotone" color="white" />
           </div>
@@ -169,7 +169,7 @@
             <span class="db-action__name">الكاشير</span>
           </div>
         </div>
-        <div class="db-action" v-if="hasRole(['admin', 'kitchen'])" @click="$router.push('/kitchen')">
+        <div class="db-action" v-if="hasRole(['admin', 'supervisor', 'kitchen'])" @click="$router.push('/kitchen')">
           <div class="db-action__icon db-action__icon--green">
             <PhChefHat :size="22" weight="duotone" color="white" />
           </div>
@@ -227,7 +227,7 @@ const stats = ref({
 const recentOrders = ref([])
 const loading = ref({
   stats: true,
-  orders: true
+  orders: false
 })
 const ordersPagination = ref({
   page: 1,
@@ -272,8 +272,10 @@ const getOrderStatusText = (status) => {
   return texts[status] || status
 }
 
+// "آخر الطلبات": every order of today's business day, newest first, with its status
+// (completed and cancelled included — the status column shows which is which)
 const loadRecentOrders = async (page = 1) => {
-  if (!hasRole(['admin', 'kitchen', 'cashier'])) return
+  if (!hasRole(['admin', 'supervisor', 'kitchen', 'cashier'])) return
 
   loading.value.orders = true
   try {
@@ -281,7 +283,6 @@ const loadRecentOrders = async (page = 1) => {
     const response = await orderAPI.getAll({
       page,
       limit: ordersPagination.value.itemsPerPage,
-      status: 'pending,preparing,ready',
       date: today
     })
     const orders = Array.isArray(response?.data?.items) ? response.data.items : []
@@ -307,7 +308,7 @@ const loadRecentOrders = async (page = 1) => {
 const loadDashboardData = async () => {
   loading.value.stats = true
   try {
-    if (hasRole(['admin', 'kitchen', 'cashier'])) {
+    if (hasRole(['admin', 'supervisor', 'kitchen', 'cashier'])) {
       try {
         const activeOrdersResponse = await orderAPI.getActive()
         const activeOrders = Array.isArray(activeOrdersResponse?.data) 
