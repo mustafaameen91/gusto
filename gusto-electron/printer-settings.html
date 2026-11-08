@@ -47,7 +47,7 @@
 <body>
 <header>
   <img src="assets/logo.png" alt="جوستو">
-  <div><h1>إعدادات الطابعات والخادم</h1><p>تُحفظ على هذا الجهاز فقط</p></div>
+  <div><h1>إعدادات الطابعات والخادم</h1><p>تُحفظ على هذا الجهاز فقط · <span id="appVersion"></span></p></div>
 </header>
 <main>
   <section class="card">
@@ -185,6 +185,7 @@ $('#close').addEventListener('click', () => api.close());
 
 (async () => {
   settings = await api.load();
+  if (settings.appVersion) document.getElementById('appVersion').textContent = 'الإصدار ' + settings.appVersion;
   systemPrinters = await api.systemPrinters();
   $('#serverUrl').value = settings.serverUrl || '';
   await loadCategories();

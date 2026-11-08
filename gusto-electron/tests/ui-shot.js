@@ -18,6 +18,7 @@ app.whenReady().then(async () => {
   if (serverUrl) ipcMain.emit("open-printer-settings", {});
   await new Promise((r) => setTimeout(r, 3500));
   for (const w of BrowserWindow.getAllWindows()) {
+    console.log("TITLE:", w.getTitle());
     const title = w.webContents.getURL().split("/").pop().split("?")[0] || "window";
     const img = await w.webContents.capturePage();
     fs.writeFileSync(path.join(outDir, `${serverUrl ? "configured" : "first-run"}-${title}.png`), img.toPNG());

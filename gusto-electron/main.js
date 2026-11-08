@@ -14,6 +14,9 @@ const isDev = process.argv.includes("--dev");
 // default https://gusto.codility.tech. GUSTO_URL overrides it; --dev always uses the local dev server.
 const frontendUrl = () => process.env.GUSTO_URL || (isDev ? "http://localhost:8081" : settingsStore.load().serverUrl || "");
 
+// The POS app's version, shown in the title bar, Help → About and the settings screen
+const appTitle = () => `مطعم جوستو - Gusto Restaurant — الإصدار ${app.getVersion()}`;
+
 let mainWindow;
 let customerWindow;
 let settingsWindow;
@@ -36,7 +39,7 @@ function createWindow() {
     height: 900,
     minWidth: 1024,
     minHeight: 768,
-    title: "مطعم جوستو - Gusto Restaurant",
+    title: appTitle(),
     icon: path.join(__dirname, "assets", "icon.png"),
     backgroundColor: "#f5f5f5",
     webPreferences: {
@@ -65,6 +68,12 @@ function createWindow() {
   }
 
   // Handle window closed
+  // Keep the version in the title bar (the web page would otherwise replace the title)
+  mainWindow.on("page-title-updated", (e) => {
+    e.preventDefault();
+    mainWindow.setTitle(appTitle());
+  });
+
   mainWindow.on("closed", () => {
     mainWindow = null;
   });
@@ -356,7 +365,7 @@ function createMenu() {
               type: "info",
               title: "حول البرنامج",
               message: "مطعم جوستو - نظام إدارة المطعم",
-              detail: "الإصدار 1.0.0\n\nنظام شامل لإدارة المطاعم\n\n© 2026 Gusto Restaurant",
+              detail: `الإصدار ${app.getVersion()}\n\nنظام شامل لإدارة المطاعم\n\n© 2026 Gusto Restaurant`,
             });
           },
         },
@@ -424,7 +433,7 @@ function setupPrintHandlers() {
   ipcMain.on("retry-connection", () => mainWindow && loadApp());
 
   // ----- settings window -----
-  ipcMain.handle("settings:load", () => settingsStore.load());
+  ipcMain.handle("settings:load", () => ({ ...settingsStore.load(), appVersion: app.getVersion() }));
   ipcMain.handle("settings:save", (_e, s) => {
     try {
       const before = frontendUrl();
