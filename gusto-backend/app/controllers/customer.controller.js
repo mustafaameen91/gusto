@@ -1,4 +1,5 @@
 const Customer = require("../models/customer.model");
+const { todayBusinessDate, businessWindow } = require("../services/businessDay");
 
 exports.getAll = (req, res) => {
   const withBalance = req.query.withBalance === "1" || req.query.withBalance === "true";
@@ -143,7 +144,7 @@ exports.createReceipt = (req, res) => {
 
   const receiptData = {
     customerId,
-    receiptDate: req.body.receiptDate || new Date().toISOString().slice(0, 10),
+    receiptDate: req.body.receiptDate || todayBusinessDate(),
     amount,
     paymentMethod: req.body.paymentMethod || "cash",
     recordedBy: req.userId || null,

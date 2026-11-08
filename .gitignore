@@ -19,3 +19,4 @@ gusto-backend/gusto-frontend/
 .vscode/
 .idea/
 *.log
+gusto-backend/tests/.server.log

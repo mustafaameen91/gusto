@@ -9,11 +9,24 @@ const connection = mysql.createPool({
   database: dbConfig.DB,
   port: dbConfig.PORT,
   multipleStatements: true,
+  // DATE columns as 'YYYY-MM-DD' text; as JS Dates they shift to the previous day in UTC
+  dateStrings: ["DATE"],
   waitForConnections: true,
   connectionLimit: 10,
   queueLimit: 0,
   enableKeepAlive: true,
   keepAliveInitialDelay: 10000
+});
+
+// MySQL uses the same clock as the app: NOW() and CURRENT_TIMESTAMP in the restaurant's
+// time zone, even when the database server itself runs in UTC.
+const tzOffset = () => {
+  const m = -new Date().getTimezoneOffset();
+  const sign = m >= 0 ? "+" : "-";
+  return `${sign}${String(Math.floor(Math.abs(m) / 60)).padStart(2, "0")}:${String(Math.abs(m) % 60).padStart(2, "0")}`;
+};
+connection.on("connection", (conn) => {
+  conn.query("SET time_zone = ?", [tzOffset()]);
 });
 
 // Test connection

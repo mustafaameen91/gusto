@@ -1,4 +1,5 @@
 const Expense = require("../models/expense.model");
+const { todayBusinessDate, businessWindow } = require("../services/businessDay");
 const DailyReceipt = require("../models/dailyReceipt.model");
 const db = require("../models/db");
 
@@ -314,8 +315,8 @@ exports.delete = (req, res) => {
 
 // Get expense summary
 exports.getSummary = (req, res) => {
-  const startDate = req.query.startDate || new Date().toISOString().split('T')[0];
-  const endDate = req.query.endDate || new Date().toISOString().split('T')[0];
+  const startDate = req.query.startDate || todayBusinessDate();
+  const endDate = req.query.endDate || todayBusinessDate();
   
   Expense.getSummary(startDate, endDate, (err, data) => {
     if (err) {
@@ -329,8 +330,8 @@ exports.getSummary = (req, res) => {
 
 // Get total expenses
 exports.getTotal = (req, res) => {
-  const startDate = req.query.startDate || new Date().toISOString().split('T')[0];
-  const endDate = req.query.endDate || new Date().toISOString().split('T')[0];
+  const startDate = req.query.startDate || todayBusinessDate();
+  const endDate = req.query.endDate || todayBusinessDate();
   
   Expense.getTotal(startDate, endDate, (err, data) => {
     if (err) {

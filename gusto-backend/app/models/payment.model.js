@@ -46,11 +46,11 @@ Payment.getAll = (filters, result) => {
   const params = [];
 
   if (filters.startDate) {
-    query += " AND DATE(o.orderDate) >= ?";
+    query += " AND o.orderDate >= CONCAT(?, ' 03:00:00')";
     params.push(filters.startDate);
   }
   if (filters.endDate) {
-    query += " AND DATE(o.orderDate) <= ?";
+    query += " AND o.orderDate < CONCAT(DATE_ADD(?, INTERVAL 1 DAY), ' 03:00:00')";
     params.push(filters.endDate);
   }
   if (filters.dailyReceiptId) {

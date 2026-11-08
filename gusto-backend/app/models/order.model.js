@@ -1,31 +1,8 @@
 const db = require("./db");
 
-// Helper function to get cafe day range (7 AM to 2:59 AM next day)
-// Returns { startDateTime, endDateTime } in MySQL format
-const getCafeDayRange = (date) => {
-  const selectedDate = new Date(date + "T00:00:00");
-  const startDate = new Date(selectedDate);
-  startDate.setHours(7, 0, 0, 0);
-
-  const endDate = new Date(selectedDate);
-  endDate.setDate(endDate.getDate() + 1);
-  endDate.setHours(2, 59, 59, 999);
-
-  const formatDateForMySQL = (date) => {
-    const year = date.getFullYear();
-    const month = String(date.getMonth() + 1).padStart(2, "0");
-    const day = String(date.getDate()).padStart(2, "0");
-    const hours = String(date.getHours()).padStart(2, "0");
-    const minutes = String(date.getMinutes()).padStart(2, "0");
-    const seconds = String(date.getSeconds()).padStart(2, "0");
-    return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
-  };
-
-  return {
-    startDateTime: formatDateForMySQL(startDate),
-    endDateTime: formatDateForMySQL(endDate),
-  };
-};
+const { businessWindow } = require("../services/businessDay");
+// Business day 03:00 → 02:59 next morning (shared definition)
+const getCafeDayRange = (date) => businessWindow(date, date);
 
 const Order = function (order) {
   this.orderNumber = order.orderNumber;

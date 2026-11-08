@@ -1,4 +1,5 @@
 const db = require("./db");
+const { todayBusinessDate, businessWindow } = require("../services/businessDay");
 
 const SupplierTransfer = {};
 
@@ -7,7 +8,7 @@ SupplierTransfer.create = (data, result) => {
     fromSupplierId: data.fromSupplierId,
     toSupplierId: data.toSupplierId,
     amount: data.amount,
-    transferDate: data.transferDate || new Date().toISOString().slice(0, 10),
+    transferDate: data.transferDate || todayBusinessDate(),
     notes: data.notes || null,
     recordedBy: data.recordedBy || null
   };

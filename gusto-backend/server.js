@@ -6,6 +6,8 @@ const compression = require("compression");
 const http = require("http");
 const path = require("path");
 require("dotenv").config();
+// All dates in the app are the restaurant's local time (business day 03:00 → 02:59)
+process.env.TZ = process.env.TZ || "Asia/Baghdad";
 
 const app = express();
 

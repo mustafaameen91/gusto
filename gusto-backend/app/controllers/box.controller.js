@@ -1,4 +1,5 @@
 const db = require("../models/db");
+const { todayBusinessDate, businessWindow } = require("../services/businessDay");
 const Expense = require("../models/expense.model");
 const Purchase = require("../models/purchase.model");
 const Order = require("../models/order.model");
@@ -8,7 +9,7 @@ const PostingSettings = require("../models/postingSettings.model");
 
 // Get current cash box balance
 exports.getBalance = (req, res) => {
-  const today = new Date().toISOString().split('T')[0];
+  const today = todayBusinessDate();
   
   // Get current open receipt
   DailyReceipt.findByDate(today, (err, receipt) => {
@@ -224,37 +225,14 @@ exports.getSummary = (req, res) => {
 
 // Get all transactions (sales, expenses, purchases)
 exports.getTransactions = (req, res) => {
-  const startDate = req.query.startDate || new Date().toISOString().split('T')[0];
-  const endDate = req.query.endDate || new Date().toISOString().split('T')[0];
+  const startDate = req.query.startDate || todayBusinessDate();
+  const endDate = req.query.endDate || todayBusinessDate();
   
   const transactions = [];
   
-  // Helper function for cafe day range (reuse from above)
-  const getCafeDayRange = (date) => {
-    const selectedDate = new Date(date + 'T00:00:00');
-    const startDate = new Date(selectedDate);
-    startDate.setHours(7, 0, 0, 0);
-    
-    const endDate = new Date(selectedDate);
-    endDate.setDate(endDate.getDate() + 1);
-    endDate.setHours(2, 59, 59, 999);
-    
-    const formatDateForMySQL = (date) => {
-      const year = date.getFullYear();
-      const month = String(date.getMonth() + 1).padStart(2, '0');
-      const day = String(date.getDate()).padStart(2, '0');
-      const hours = String(date.getHours()).padStart(2, '0');
-      const minutes = String(date.getMinutes()).padStart(2, '0');
-      const seconds = String(date.getSeconds()).padStart(2, '0');
-      return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
-    };
-    
-    return {
-      startDateTime: formatDateForMySQL(startDate),
-      endDateTime: formatDateForMySQL(endDate)
-    };
-  };
-  
+  // Business day 03:00 → 02:59 (shared definition); ranges use the same window
+  const getCafeDayRange = (date) => businessWindow(date, date);
+
   // Get sales (orders) - use cafe day logic for single day
   let salesQuery, salesParams;
   if (startDate === endDate) {
@@ -285,11 +263,11 @@ exports.getTransactions = (req, res) => {
         'مبيعات' as description,
         cashierId as userId
       FROM Orders
-      WHERE DATE(orderDate) >= ? AND DATE(orderDate) <= ?
+      WHERE orderDate >= ? AND orderDate <= ?
         AND status != 'cancelled'
       ORDER BY orderDate DESC
     `;
-    salesParams = [startDate, endDate];
+    salesParams = [businessWindow(startDate, endDate).startDateTime, businessWindow(startDate, endDate).endDateTime];
   }
   
   // Get expenses

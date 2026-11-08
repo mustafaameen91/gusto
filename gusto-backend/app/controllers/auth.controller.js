@@ -1,4 +1,5 @@
 const bcrypt = require("bcryptjs");
+const { todayBusinessDate, businessWindow } = require("../services/businessDay");
 const jwt = require("jsonwebtoken");
 const Staff = require("../models/staff.model");
 
@@ -108,7 +109,7 @@ exports.register = (req, res) => {
     phone: req.body.phone || "",
     password: hashedPassword,
     role: req.body.role || "cashier",
-    hireDate: req.body.hireDate || new Date().toISOString().split('T')[0],
+    hireDate: req.body.hireDate || todayBusinessDate(),
     salary: req.body.salary || 0,
     isActive: req.body.isActive !== undefined ? req.body.isActive : true
   };

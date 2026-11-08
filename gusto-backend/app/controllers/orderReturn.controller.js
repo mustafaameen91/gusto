@@ -1,4 +1,5 @@
 const db = require("../models/db");
+const { todayBusinessDate, businessWindow } = require("../services/businessDay");
 const OrderReturn = require("../models/orderReturn.model");
 
 // Self-healing: ensure tables exist
@@ -74,8 +75,8 @@ exports.create = (req, res) => {
       if (errTx) { conn.release(); return res.status(500).json({ message: errTx.message }); }
       try {
         const [order] = await q(
-          "SELECT o.*, (DATE(o.orderDate) = CURDATE()) AS isToday FROM Orders o WHERE o.idOrder = ? FOR UPDATE",
-          [orderId]
+          "SELECT o.*, (o.orderDate BETWEEN ? AND ?) AS isToday FROM Orders o WHERE o.idOrder = ? FOR UPDATE",
+          [businessWindow(todayBusinessDate()).startDateTime, businessWindow(todayBusinessDate()).endDateTime, orderId]
         );
         if (!order) return fail(404, "Order not found.");
         if (order.status === "cancelled") return fail(400, "لا يمكن إرجاع طلب ملغى");

@@ -52,6 +52,8 @@ DailyReceipt.findById = (id, result) => {
 };
 
 // Find open receipt by date (for getCurrent - only returns open receipts)
+// The open shift (there is at most one), whatever business date it was opened on.
+// `date` is kept for callers but no longer filters: a shift open past 03:00 is still current.
 DailyReceipt.findByDate = (date, result) => {
   const query = `
     SELECT 
@@ -61,7 +63,9 @@ DailyReceipt.findByDate = (date, result) => {
     FROM DailyReceipts dr
     LEFT JOIN Staff s1 ON dr.openedBy = s1.idStaff
     LEFT JOIN Staff s2 ON dr.closedBy = s2.idStaff
-    WHERE dr.receiptDate = ? AND dr.isClosed = FALSE
+    WHERE dr.isClosed = FALSE
+    ORDER BY dr.idDailyReceipt DESC
+    LIMIT 1
   `;
   
   db.query(query, [date], (err, res) => {

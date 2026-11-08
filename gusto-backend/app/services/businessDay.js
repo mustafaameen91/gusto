@@ -1,7 +1,8 @@
-// The restaurant's business day runs from 07:00 to 02:59:59 the next morning.
+// The restaurant's business day runs from 03:00 to 02:59:59 the next morning, so days
+// follow each other with no gap (a late shift after midnight still belongs to the day before).
 // Every "today" and every date range in the app goes through these helpers so that
 // a day's report, a week's report and the shift screen all agree.
-const DAY_START = "07:00:00";
+const DAY_START = "03:00:00";
 const DAY_END = "02:59:59";
 const CUTOFF_HOUR = 3; // before 03:00 still belongs to the previous business day
 
@@ -31,4 +32,7 @@ function businessWindow(startDate, endDate = startDate) {
   };
 }
 
-module.exports = { addDays, businessDateOf, todayBusinessDate, businessWindow };
+// Business date of a stored DATETIME/TIMESTAMP, as SQL (for GROUP BY day)
+const businessDateSql = (column) => `DATE(${column} - INTERVAL ${CUTOFF_HOUR} HOUR)`;
+
+module.exports = { addDays, businessDateOf, todayBusinessDate, businessWindow, businessDateSql };

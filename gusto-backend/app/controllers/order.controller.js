@@ -1,4 +1,5 @@
 const Order = require("../models/order.model");
+const { todayBusinessDate, businessWindow } = require("../services/businessDay");
 const MenuItem = require("../models/menuItem.model");
 const Recipe = require("../models/recipe.model");
 const Ingredient = require("../models/ingredient.model");
@@ -284,7 +285,7 @@ exports.create = async (req, res) => {
   req.body.discount = priced.discount;
   req.body.discountType = priced.discountType;
 
-  const today = new Date().toISOString().split("T")[0];
+  const today = todayBusinessDate();
 
   // Require an open shift for GL: link order to dailyReceiptId
   DailyReceipt.findByDate(today, (err, openShift) => {
@@ -529,7 +530,7 @@ exports.recomputeStatus = (req, res) => {
 };
 
 exports.getDailySummary = (req, res) => {
-  const date = req.query.date || new Date().toISOString().split('T')[0];
+  const date = req.query.date || todayBusinessDate();
 
   Order.getDailySummary(date, (err, data) => {
     if (err) {

@@ -5,40 +5,19 @@ const Order = require("../models/order.model");
 const InventoryTransaction = require("../models/inventoryTransaction.model");
 const { profitForPeriod } = require("../services/profit.service");
 
-// Helper function to get cafe day range (7 AM to 2:59 AM next day)
-const getCafeDayRange = (date) => {
-  const selectedDate = new Date(date + 'T00:00:00');
-  const startDate = new Date(selectedDate);
-  startDate.setHours(7, 0, 0, 0);
-  
-  const endDate = new Date(selectedDate);
-  endDate.setDate(endDate.getDate() + 1);
-  endDate.setHours(2, 59, 59, 999);
-  
-  const formatDateForMySQL = (date) => {
-    const year = date.getFullYear();
-    const month = String(date.getMonth() + 1).padStart(2, '0');
-    const day = String(date.getDate()).padStart(2, '0');
-    const hours = String(date.getHours()).padStart(2, '0');
-    const minutes = String(date.getMinutes()).padStart(2, '0');
-    const seconds = String(date.getSeconds()).padStart(2, '0');
-    return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
-  };
-  
-  return {
-    startDateTime: formatDateForMySQL(startDate),
-    endDateTime: formatDateForMySQL(endDate)
-  };
-};
+const { todayBusinessDate, businessWindow } = require("../services/businessDay");
+// Business day 03:00 → 02:59 next morning (shared definition); ranges use the same window
+const getCafeDayRange = (date) => businessWindow(date, date);
+const rangeWin = (startDate, endDate) => businessWindow(startDate, endDate);
 
 // Financial Report (Profit & Loss)
 // paymentMethod filter: 'all' | 'cash' | 'card'. Orders: orderType 'cashier' = cash, 'card' = credit card
 exports.getFinancial = (req, res) => {
-  const startDate = req.query.startDate || new Date().toISOString().split('T')[0];
-  const endDate = req.query.endDate || new Date().toISOString().split('T')[0];
+  const startDate = req.query.startDate || todayBusinessDate();
+  const endDate = req.query.endDate || todayBusinessDate();
   const paymentMethod = (req.query.paymentMethod || 'all').toLowerCase();
 
-  const paymentFilter = paymentMethod === 'cash' ? " AND orderType = 'cashier'" : paymentMethod === 'card' ? " AND orderType = 'card'" : '';
+  const paymentFilter = paymentMethod === 'cash' ? " AND saleType = 'cash' AND orderType <> 'card'" : paymentMethod === 'card' ? " AND orderType = 'card'" : paymentMethod === 'credit' ? " AND saleType = 'credit'" : '';
   profitForPeriod(startDate, endDate, (errProfit, pf) => {
     if (errProfit) return res.status(500).json({ message: errProfit.message });
 
@@ -61,10 +40,10 @@ exports.getFinancial = (req, res) => {
         COALESCE(SUM(totalAmount), 0) as totalSales,
         COUNT(*) as orderCount
       FROM Orders
-      WHERE DATE(orderDate) >= ? AND DATE(orderDate) <= ?
+      WHERE orderDate >= ? AND orderDate <= ?
         AND status != 'cancelled'${paymentFilter}
     `;
-    salesParams = [startDate, endDate];
+    salesParams = [rangeWin(startDate, endDate).startDateTime, rangeWin(startDate, endDate).endDateTime];
   }
 
   // Totals by payment type (always for the period, no payment filter)
@@ -73,27 +52,27 @@ exports.getFinancial = (req, res) => {
     const cafeDay = getCafeDayRange(startDate);
     byPaymentQuery = `
       SELECT 
-        COALESCE(orderType, 'cashier') as orderType,
+        CASE WHEN saleType = 'credit' THEN 'credit' WHEN orderType = 'card' THEN 'card' ELSE 'cash' END as orderType,
         COALESCE(SUM(totalAmount), 0) as total,
         COUNT(*) as orderCount
       FROM Orders
       WHERE orderDate >= ? AND orderDate <= ?
         AND status != 'cancelled'
-      GROUP BY orderType
+      GROUP BY 1
     `;
     byPaymentParams = [cafeDay.startDateTime, cafeDay.endDateTime];
   } else {
     byPaymentQuery = `
       SELECT 
-        COALESCE(orderType, 'cashier') as orderType,
+        CASE WHEN saleType = 'credit' THEN 'credit' WHEN orderType = 'card' THEN 'card' ELSE 'cash' END as orderType,
         COALESCE(SUM(totalAmount), 0) as total,
         COUNT(*) as orderCount
       FROM Orders
-      WHERE DATE(orderDate) >= ? AND DATE(orderDate) <= ?
+      WHERE orderDate >= ? AND orderDate <= ?
         AND status != 'cancelled'
-      GROUP BY orderType
+      GROUP BY 1
     `;
-    byPaymentParams = [startDate, endDate];
+    byPaymentParams = [rangeWin(startDate, endDate).startDateTime, rangeWin(startDate, endDate).endDateTime];
   }
 
   // Get expenses
@@ -114,11 +93,12 @@ exports.getFinancial = (req, res) => {
           message: err.message || "Error retrieving payment breakdown."
         });
       }
-      let totalCash = 0, totalCard = 0;
+      let totalCash = 0, totalCard = 0, totalCredit = 0;
       (byPaymentRows || []).forEach(row => {
         const total = parseFloat(row.total || 0);
-        if (row.orderType === 'card') totalCard = total;
-        else totalCash += total; // 'cashier' or any other
+        if (row.orderType === 'card') totalCard += total;
+        else if (row.orderType === 'credit') totalCredit += total;
+        else totalCash += total;
       });
 
       db.query(salesQuery, salesParams, (err, salesResult) => {
@@ -147,7 +127,8 @@ exports.getFinancial = (req, res) => {
             totalSales: totalSales,
             orderCount: orderCount,
             totalCash: totalCash,
-            totalCard: totalCard
+            totalCard: totalCard,
+            totalCredit: totalCredit
           },
           expenses: { totalExpenses: totalExpenses, expenseCount: expenseTotal?.expenseCount || 0 },
           purchases: { totalPurchases: totalPurchases },
@@ -184,7 +165,7 @@ exports.getFinancial = (req, res) => {
                 mi.itemName,
                 c.categoryName,
                 COALESCE(SUM(oi.quantity), 0) as totalQuantity,
-                COALESCE(SUM(oi.price * oi.quantity), 0) as revenue
+                COALESCE(SUM(oi.price * oi.quantity * o.totalAmount / NULLIF(o.totalAmount + o.discount, 0)), 0) as revenue
               FROM Orders o
               JOIN OrderItems oi ON o.idOrder = oi.orderId
               JOIN MenuItems mi ON oi.menuItemId = mi.idMenuItem
@@ -202,25 +183,25 @@ exports.getFinancial = (req, res) => {
                 mi.itemName,
                 c.categoryName,
                 COALESCE(SUM(oi.quantity), 0) as totalQuantity,
-                COALESCE(SUM(oi.price * oi.quantity), 0) as revenue
+                COALESCE(SUM(oi.price * oi.quantity * o.totalAmount / NULLIF(o.totalAmount + o.discount, 0)), 0) as revenue
               FROM Orders o
               JOIN OrderItems oi ON o.idOrder = oi.orderId
               JOIN MenuItems mi ON oi.menuItemId = mi.idMenuItem
               LEFT JOIN Categories c ON mi.categoryId = c.idCategory
-              WHERE DATE(o.orderDate) >= ? AND DATE(o.orderDate) <= ?
+              WHERE o.orderDate >= ? AND o.orderDate <= ?
                 AND o.status != 'cancelled'
                 AND oi.status NOT IN ('cancelled', 'returned')${paymentFilter}
               GROUP BY mi.idMenuItem, mi.itemName, c.categoryName
               ORDER BY totalQuantity DESC
             `;
-            itemSalesParams = [startDate, endDate];
+            itemSalesParams = [rangeWin(startDate, endDate).startDateTime, rangeWin(startDate, endDate).endDateTime];
           }
 
           let ordersListQuery, ordersListParams;
           if (startDate === endDate) {
             const cafeDay = getCafeDayRange(startDate);
             ordersListQuery = `
-              SELECT orderNumber, orderDate, (totalAmount) as totalAmount, COALESCE(orderType, 'cashier') as orderType
+              SELECT orderNumber, orderDate, (totalAmount) as totalAmount, CASE WHEN saleType = 'credit' THEN 'credit' WHEN orderType = 'card' THEN 'card' ELSE 'cash' END as orderType
               FROM Orders
               WHERE orderDate >= ? AND orderDate <= ? AND status != 'cancelled'${paymentFilter}
               ORDER BY orderDate DESC
@@ -228,12 +209,12 @@ exports.getFinancial = (req, res) => {
             ordersListParams = [cafeDay.startDateTime, cafeDay.endDateTime];
           } else {
             ordersListQuery = `
-              SELECT orderNumber, orderDate, (totalAmount) as totalAmount, COALESCE(orderType, 'cashier') as orderType
+              SELECT orderNumber, orderDate, (totalAmount) as totalAmount, CASE WHEN saleType = 'credit' THEN 'credit' WHEN orderType = 'card' THEN 'card' ELSE 'cash' END as orderType
               FROM Orders
-              WHERE DATE(orderDate) >= ? AND DATE(orderDate) <= ? AND status != 'cancelled'${paymentFilter}
+              WHERE orderDate >= ? AND orderDate <= ? AND status != 'cancelled'${paymentFilter}
               ORDER BY orderDate DESC
             `;
-            ordersListParams = [startDate, endDate];
+            ordersListParams = [rangeWin(startDate, endDate).startDateTime, rangeWin(startDate, endDate).endDateTime];
           }
 
           db.query(ordersListQuery, ordersListParams, (errOrders, ordersListRows) => {
@@ -270,14 +251,14 @@ exports.getFinancial = (req, res) => {
 
 // Sales Report (supports paymentMethod: all | cash | card)
 exports.getSales = (req, res) => {
-  const startDate = req.query.startDate || new Date().toISOString().split('T')[0];
-  const endDate = req.query.endDate || new Date().toISOString().split('T')[0];
+  const startDate = req.query.startDate || todayBusinessDate();
+  const endDate = req.query.endDate || todayBusinessDate();
   const paymentMethod = (req.query.paymentMethod || 'all').toLowerCase();
   const categoryIds = req.query.categoryIds ? req.query.categoryIds.split(',').map(id => parseInt(id.trim())) : [];
   const menuItemIds = req.query.menuItemIds ? req.query.menuItemIds.split(',').map(id => parseInt(id.trim())) : [];
 
-  const paymentFilter = paymentMethod === 'cash' ? " AND orderType = 'cashier'" : paymentMethod === 'card' ? " AND orderType = 'card'" : '';
-  const paymentFilterO = paymentMethod === 'cash' ? " AND o.orderType = 'cashier'" : paymentMethod === 'card' ? " AND o.orderType = 'card'" : '';
+  const paymentFilter = paymentMethod === 'cash' ? " AND saleType = 'cash' AND orderType <> 'card'" : paymentMethod === 'card' ? " AND orderType = 'card'" : paymentMethod === 'credit' ? " AND saleType = 'credit'" : '';
+  const paymentFilterO = paymentMethod === 'cash' ? " AND o.saleType = 'cash' AND o.orderType <> 'card'" : paymentMethod === 'card' ? " AND o.orderType = 'card'" : paymentMethod === 'credit' ? " AND o.saleType = 'credit'" : '';
 
   // Build filter conditions
   let categoryFilter = '';
@@ -305,30 +286,31 @@ exports.getSales = (req, res) => {
     if (categoryIds.length > 0 || menuItemIds.length > 0) {
       dailySalesQuery = `
         SELECT 
-          DATE(o.orderDate) as date,
-          COALESCE(SUM(oi.price * oi.quantity), 0) as totalSales,
+          DATE(o.orderDate - INTERVAL 3 HOUR) as date,
+          COALESCE(SUM(oi.price * oi.quantity * o.totalAmount / NULLIF(o.totalAmount + o.discount, 0)), 0) as totalSales,
           COUNT(DISTINCT o.idOrder) as orderCount
         FROM Orders o
         JOIN OrderItems oi ON o.idOrder = oi.orderId
         JOIN MenuItems mi ON oi.menuItemId = mi.idMenuItem
         WHERE o.orderDate >= ? AND o.orderDate <= ?
-          AND o.status != 'cancelled'${paymentFilterO}
+          AND o.status != 'cancelled'
+        AND oi.status NOT IN ('cancelled', 'returned')${paymentFilterO}
           ${categoryFilter}
           ${menuItemFilter}
-        GROUP BY DATE(o.orderDate)
+        GROUP BY DATE(o.orderDate - INTERVAL 3 HOUR)
         ORDER BY date DESC
       `;
       dailySalesParams = [cafeDay.startDateTime, cafeDay.endDateTime, ...filterParams];
     } else {
       dailySalesQuery = `
         SELECT 
-          DATE(orderDate) as date,
+          DATE(orderDate - INTERVAL 3 HOUR) as date,
           COALESCE(SUM(totalAmount), 0) as totalSales,
           COUNT(*) as orderCount
         FROM Orders
         WHERE orderDate >= ? AND orderDate <= ?
           AND status != 'cancelled'${paymentFilter}
-        GROUP BY DATE(orderDate)
+        GROUP BY DATE(orderDate - INTERVAL 3 HOUR)
         ORDER BY date DESC
       `;
       dailySalesParams = [cafeDay.startDateTime, cafeDay.endDateTime];
@@ -338,33 +320,34 @@ exports.getSales = (req, res) => {
     if (categoryIds.length > 0 || menuItemIds.length > 0) {
       dailySalesQuery = `
         SELECT 
-          DATE(o.orderDate) as date,
-          COALESCE(SUM(oi.price * oi.quantity), 0) as totalSales,
+          DATE(o.orderDate - INTERVAL 3 HOUR) as date,
+          COALESCE(SUM(oi.price * oi.quantity * o.totalAmount / NULLIF(o.totalAmount + o.discount, 0)), 0) as totalSales,
           COUNT(DISTINCT o.idOrder) as orderCount
         FROM Orders o
         JOIN OrderItems oi ON o.idOrder = oi.orderId
         JOIN MenuItems mi ON oi.menuItemId = mi.idMenuItem
-        WHERE DATE(o.orderDate) >= ? AND DATE(o.orderDate) <= ?
-          AND o.status != 'cancelled'${paymentFilterO}
+        WHERE o.orderDate >= ? AND o.orderDate <= ?
+          AND o.status != 'cancelled'
+        AND oi.status NOT IN ('cancelled', 'returned')${paymentFilterO}
           ${categoryFilter}
           ${menuItemFilter}
-        GROUP BY DATE(o.orderDate)
+        GROUP BY DATE(o.orderDate - INTERVAL 3 HOUR)
         ORDER BY date DESC
       `;
-      dailySalesParams = [startDate, endDate, ...filterParams];
+      dailySalesParams = [rangeWin(startDate, endDate).startDateTime, rangeWin(startDate, endDate).endDateTime, ...filterParams];
     } else {
       dailySalesQuery = `
         SELECT 
-          DATE(orderDate) as date,
+          DATE(orderDate - INTERVAL 3 HOUR) as date,
           COALESCE(SUM(totalAmount), 0) as totalSales,
           COUNT(*) as orderCount
         FROM Orders
-        WHERE DATE(orderDate) >= ? AND DATE(orderDate) <= ?
+        WHERE orderDate >= ? AND orderDate <= ?
           AND status != 'cancelled'${paymentFilter}
-        GROUP BY DATE(orderDate)
+        GROUP BY DATE(orderDate - INTERVAL 3 HOUR)
         ORDER BY date DESC
       `;
-      dailySalesParams = [startDate, endDate];
+      dailySalesParams = [rangeWin(startDate, endDate).startDateTime, rangeWin(startDate, endDate).endDateTime];
     }
   }
   
@@ -375,14 +358,15 @@ exports.getSales = (req, res) => {
     categorySalesQuery = `
       SELECT 
         c.categoryName,
-        COALESCE(SUM(oi.price * oi.quantity), 0) as totalSales,
+        COALESCE(SUM(oi.price * oi.quantity * o.totalAmount / NULLIF(o.totalAmount + o.discount, 0)), 0) as totalSales,
         SUM(oi.quantity) as itemsSold
       FROM Orders o
       JOIN OrderItems oi ON o.idOrder = oi.orderId
       JOIN MenuItems mi ON oi.menuItemId = mi.idMenuItem
       JOIN Categories c ON mi.categoryId = c.idCategory
       WHERE o.orderDate >= ? AND o.orderDate <= ?
-        AND o.status != 'cancelled'${paymentFilterO}
+        AND o.status != 'cancelled'
+        AND oi.status NOT IN ('cancelled', 'returned')${paymentFilterO}
         ${categoryFilter}
         ${menuItemFilter}
       GROUP BY c.idCategory, c.categoryName
@@ -393,20 +377,21 @@ exports.getSales = (req, res) => {
     categorySalesQuery = `
       SELECT 
         c.categoryName,
-        COALESCE(SUM(oi.price * oi.quantity), 0) as totalSales,
+        COALESCE(SUM(oi.price * oi.quantity * o.totalAmount / NULLIF(o.totalAmount + o.discount, 0)), 0) as totalSales,
         SUM(oi.quantity) as itemsSold
       FROM Orders o
       JOIN OrderItems oi ON o.idOrder = oi.orderId
       JOIN MenuItems mi ON oi.menuItemId = mi.idMenuItem
       JOIN Categories c ON mi.categoryId = c.idCategory
-      WHERE DATE(o.orderDate) >= ? AND DATE(o.orderDate) <= ?
-        AND o.status != 'cancelled'${paymentFilterO}
+      WHERE o.orderDate >= ? AND o.orderDate <= ?
+        AND o.status != 'cancelled'
+        AND oi.status NOT IN ('cancelled', 'returned')${paymentFilterO}
         ${categoryFilter}
         ${menuItemFilter}
       GROUP BY c.idCategory, c.categoryName
       ORDER BY totalSales DESC
     `;
-    categorySalesParams = [startDate, endDate, ...filterParams];
+    categorySalesParams = [rangeWin(startDate, endDate).startDateTime, rangeWin(startDate, endDate).endDateTime, ...filterParams];
   }
 
   // Top selling items - use same date logic
@@ -417,7 +402,7 @@ exports.getSales = (req, res) => {
       SELECT
         mi.itemName,
         SUM(oi.quantity) as totalQuantity,
-        COALESCE(SUM(oi.price * oi.quantity), 0) as revenue
+        COALESCE(SUM(oi.price * oi.quantity * o.totalAmount / NULLIF(o.totalAmount + o.discount, 0)), 0) as revenue
       FROM Orders o
       JOIN OrderItems oi ON o.idOrder = oi.orderId
       JOIN MenuItems mi ON oi.menuItemId = mi.idMenuItem
@@ -435,11 +420,11 @@ exports.getSales = (req, res) => {
       SELECT
         mi.itemName,
         SUM(oi.quantity) as totalQuantity,
-        COALESCE(SUM(oi.price * oi.quantity), 0) as revenue
+        COALESCE(SUM(oi.price * oi.quantity * o.totalAmount / NULLIF(o.totalAmount + o.discount, 0)), 0) as revenue
       FROM Orders o
       JOIN OrderItems oi ON o.idOrder = oi.orderId
       JOIN MenuItems mi ON oi.menuItemId = mi.idMenuItem
-      WHERE DATE(o.orderDate) >= ? AND DATE(o.orderDate) <= ?
+      WHERE o.orderDate >= ? AND o.orderDate <= ?
         AND o.status != 'cancelled'
         AND oi.status NOT IN ('cancelled', 'returned')${paymentFilterO}
         ${categoryFilter}
@@ -447,7 +432,7 @@ exports.getSales = (req, res) => {
       GROUP BY mi.idMenuItem, mi.itemName
       ORDER BY totalQuantity DESC
     `;
-    topItemsParams = [startDate, endDate, ...filterParams];
+    topItemsParams = [rangeWin(startDate, endDate).startDateTime, rangeWin(startDate, endDate).endDateTime, ...filterParams];
   }
 
   // Totals by payment (for stats: totalCash, totalCard)
@@ -455,28 +440,29 @@ exports.getSales = (req, res) => {
   if (startDate === endDate) {
     const cafeDay = getCafeDayRange(startDate);
     byPaymentQuery = `
-      SELECT COALESCE(orderType, 'cashier') as orderType, COALESCE(SUM(totalAmount), 0) as total
+      SELECT CASE WHEN saleType = 'credit' THEN 'credit' WHEN orderType = 'card' THEN 'card' ELSE 'cash' END as orderType, COALESCE(SUM(totalAmount), 0) as total
       FROM Orders
       WHERE orderDate >= ? AND orderDate <= ? AND status != 'cancelled'
-      GROUP BY orderType
+      GROUP BY 1
     `;
     byPaymentParams = [cafeDay.startDateTime, cafeDay.endDateTime];
   } else {
     byPaymentQuery = `
-      SELECT COALESCE(orderType, 'cashier') as orderType, COALESCE(SUM(totalAmount), 0) as total
+      SELECT CASE WHEN saleType = 'credit' THEN 'credit' WHEN orderType = 'card' THEN 'card' ELSE 'cash' END as orderType, COALESCE(SUM(totalAmount), 0) as total
       FROM Orders
-      WHERE DATE(orderDate) >= ? AND DATE(orderDate) <= ? AND status != 'cancelled'
-      GROUP BY orderType
+      WHERE orderDate >= ? AND orderDate <= ? AND status != 'cancelled'
+      GROUP BY 1
     `;
-    byPaymentParams = [startDate, endDate];
+    byPaymentParams = [rangeWin(startDate, endDate).startDateTime, rangeWin(startDate, endDate).endDateTime];
   }
 
   db.query(byPaymentQuery, byPaymentParams, (err, byPaymentRows) => {
-    let totalCash = 0, totalCard = 0;
+    let totalCash = 0, totalCard = 0, totalCredit = 0;
     if (!err && byPaymentRows) {
       byPaymentRows.forEach(row => {
         const total = parseFloat(row.total || 0);
-        if (row.orderType === 'card') totalCard = total;
+        if (row.orderType === 'card') totalCard += total;
+        else if (row.orderType === 'credit') totalCredit += total;
         else totalCash += total;
       });
     }
@@ -509,6 +495,7 @@ exports.getSales = (req, res) => {
           },
           totalCash: totalCash,
           totalCard: totalCard,
+          totalCredit: totalCredit,
           dailySales: dailySales.map(d => ({
             ...d,
             totalSales: parseFloat(d.totalSales),
@@ -533,8 +520,8 @@ exports.getSales = (req, res) => {
 
 // Expense Report
 exports.getExpenses = (req, res) => {
-  const startDate = req.query.startDate || new Date().toISOString().split('T')[0];
-  const endDate = req.query.endDate || new Date().toISOString().split('T')[0];
+  const startDate = req.query.startDate || todayBusinessDate();
+  const endDate = req.query.endDate || todayBusinessDate();
   
   // Get expense summary by category
   Expense.getSummary(startDate, endDate, (err, summary) => {
@@ -611,8 +598,8 @@ exports.getExpenses = (req, res) => {
 
 // Purchase Report
 exports.getPurchases = (req, res) => {
-  const startDate = req.query.startDate || new Date().toISOString().split('T')[0];
-  const endDate = req.query.endDate || new Date().toISOString().split('T')[0];
+  const startDate = req.query.startDate || todayBusinessDate();
+  const endDate = req.query.endDate || todayBusinessDate();
   
   // Get purchases with supplier info
   const purchasesQuery = `
@@ -696,7 +683,7 @@ exports.getPurchases = (req, res) => {
 
 // Daily Summary Report
 exports.getDailySummary = (req, res) => {
-  const date = req.query.date || new Date().toISOString().split('T')[0];
+  const date = req.query.date || todayBusinessDate();
   
   // Get sales
   Order.getDailySummary(date, (err, salesSummary) => {
@@ -764,8 +751,8 @@ exports.getDailySummary = (req, res) => {
 
 // Item Sales Report
 exports.getItemSales = (req, res) => {
-  const startDate = req.query.startDate || new Date().toISOString().split('T')[0];
-  const endDate = req.query.endDate || new Date().toISOString().split('T')[0];
+  const startDate = req.query.startDate || todayBusinessDate();
+  const endDate = req.query.endDate || todayBusinessDate();
   const itemIds = req.query.itemIds ? req.query.itemIds.split(',').map(id => parseInt(id.trim())) : [];
   
   if (!itemIds || itemIds.length === 0) {
@@ -785,7 +772,7 @@ exports.getItemSales = (req, res) => {
         mi.itemName,
         c.categoryName,
         COALESCE(SUM(oi.quantity), 0) as totalQuantity,
-        COALESCE(SUM(oi.price * oi.quantity), 0) as totalRevenue,
+        COALESCE(SUM(oi.price * oi.quantity * o.totalAmount / NULLIF(o.totalAmount + o.discount, 0)), 0) as totalRevenue,
         COUNT(DISTINCT o.idOrder) as orderCount
       FROM Orders o
       JOIN OrderItems oi ON o.idOrder = oi.orderId
@@ -807,20 +794,20 @@ exports.getItemSales = (req, res) => {
         mi.itemName,
         c.categoryName,
         COALESCE(SUM(oi.quantity), 0) as totalQuantity,
-        COALESCE(SUM(oi.price * oi.quantity), 0) as totalRevenue,
+        COALESCE(SUM(oi.price * oi.quantity * o.totalAmount / NULLIF(o.totalAmount + o.discount, 0)), 0) as totalRevenue,
         COUNT(DISTINCT o.idOrder) as orderCount
       FROM Orders o
       JOIN OrderItems oi ON o.idOrder = oi.orderId
       JOIN MenuItems mi ON oi.menuItemId = mi.idMenuItem
       LEFT JOIN Categories c ON mi.categoryId = c.idCategory
-      WHERE DATE(o.orderDate) >= ? AND DATE(o.orderDate) <= ?
+      WHERE o.orderDate >= ? AND o.orderDate <= ?
         AND o.status != 'cancelled'
         AND oi.status NOT IN ('cancelled', 'returned')
         AND mi.idMenuItem IN (?)
       GROUP BY mi.idMenuItem, mi.itemName, c.categoryName
       ORDER BY totalQuantity DESC
     `;
-    itemSalesParams = [startDate, endDate, itemIds];
+    itemSalesParams = [rangeWin(startDate, endDate).startDateTime, rangeWin(startDate, endDate).endDateTime, itemIds];
   }
   
   db.query(itemSalesQuery, itemSalesParams, (err, results) => {
@@ -888,7 +875,7 @@ exports.getProfitSinceOpening = (req, res) => {
 // Returns all items sold within a date+time window.
 // Query params: startDate, endDate (YYYY-MM-DD), startTime, endTime (HH:MM)
 exports.getTimeSales = (req, res) => {
-  const today = new Date().toISOString().split('T')[0];
+  const today = todayBusinessDate();
   const startDate = req.query.startDate || today;
   const endDate = req.query.endDate || today;
   const startTime = (req.query.startTime || '00:00') + ':00';
@@ -903,7 +890,7 @@ exports.getTimeSales = (req, res) => {
       mi.itemName,
       COALESCE(c.categoryName, 'غير محدد') AS categoryName,
       COALESCE(SUM(oi.quantity), 0) AS totalQuantity,
-      COALESCE(SUM(oi.price * oi.quantity), 0) AS totalRevenue,
+      COALESCE(SUM(oi.price * oi.quantity * o.totalAmount / NULLIF(o.totalAmount + o.discount, 0)), 0) AS totalRevenue,
       COUNT(DISTINCT o.idOrder) AS orderCount,
       MIN(o.orderDate) AS firstSoldAt,
       MAX(o.orderDate) AS lastSoldAt
@@ -1001,8 +988,8 @@ exports.getTimeSales = (req, res) => {
 
 // Material Usage Report
 exports.getMaterialUsage = (req, res) => {
-  const startDate = req.query.startDate || new Date().toISOString().split('T')[0];
-  const endDate = req.query.endDate || new Date().toISOString().split('T')[0];
+  const startDate = req.query.startDate || todayBusinessDate();
+  const endDate = req.query.endDate || todayBusinessDate();
 
   InventoryTransaction.getUsageSummary(startDate, endDate, (err, data) => {
     if (err) {

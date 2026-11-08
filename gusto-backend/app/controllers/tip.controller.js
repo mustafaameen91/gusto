@@ -1,4 +1,5 @@
 const Tip = require("../models/tip.model");
+const { todayBusinessDate, businessWindow } = require("../services/businessDay");
 
 // Create new tip
 exports.create = (req, res) => {
@@ -108,8 +109,8 @@ exports.delete = (req, res) => {
 
 // Get tip summary
 exports.getSummary = (req, res) => {
-  const startDate = req.query.startDate || new Date().toISOString().split('T')[0];
-  const endDate = req.query.endDate || new Date().toISOString().split('T')[0];
+  const startDate = req.query.startDate || todayBusinessDate();
+  const endDate = req.query.endDate || todayBusinessDate();
 
   Tip.getSummary(startDate, endDate, (err, data) => {
     if (err) {

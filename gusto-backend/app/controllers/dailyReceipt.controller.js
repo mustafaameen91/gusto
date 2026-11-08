@@ -1,4 +1,5 @@
 const DailyReceipt = require("../models/dailyReceipt.model");
+const { todayBusinessDate, businessWindow } = require("../services/businessDay");
 const Order = require("../models/order.model");
 const OtherIncome = require("../models/otherIncome.model");
 const Expense = require("../models/expense.model");
@@ -84,7 +85,7 @@ function withShiftCash(data, callback) {
 exports.withShiftCash = withShiftCash;
 
 exports.getCurrent = (req, res) => {
-  const today = new Date().toISOString().split('T')[0];
+  const today = todayBusinessDate();
 
   DailyReceipt.findByDate(today, (err, data) => {
     if (err) {
@@ -117,7 +118,7 @@ exports.open = (req, res) => {
     });
   }
 
-  const today = new Date().toISOString().split('T')[0];
+  const today = todayBusinessDate();
   
   // Check if there's an OPEN receipt (supports multiple shifts per day)
   DailyReceipt.findByDate(today, (err, existing) => {
@@ -194,7 +195,7 @@ exports.close = (req, res) => {
     });
   }
 
-  const today = new Date().toISOString().split('T')[0];
+  const today = todayBusinessDate();
   const dailyReceiptId = parseInt(req.params.id, 10);
   const closeStart = Date.now();
   console.log(`[close] Start dailyReceiptId=${dailyReceiptId}`);

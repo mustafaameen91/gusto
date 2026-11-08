@@ -1,4 +1,5 @@
 const Supplier = require("../models/supplier.model");
+const { todayBusinessDate, businessWindow } = require("../services/businessDay");
 const SupplierPayment = require("../models/supplierPayment.model");
 const SupplierCredit = require("../models/supplierCredit.model");
 const SupplierTransfer = require("../models/supplierTransfer.model");
@@ -331,7 +332,7 @@ exports.createTransfer = (req, res) => {
   const fromSupplierId = parseInt(req.body.fromSupplierId, 10);
   const toSupplierId = parseInt(req.body.toSupplierId, 10);
   const amount = parseFloat(req.body.amount);
-  const transferDate = req.body.transferDate || new Date().toISOString().slice(0, 10);
+  const transferDate = req.body.transferDate || todayBusinessDate();
   const notes = req.body.notes || null;
 
   if (!fromSupplierId || !toSupplierId || fromSupplierId === toSupplierId) {

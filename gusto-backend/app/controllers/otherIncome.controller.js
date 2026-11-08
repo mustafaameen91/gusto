@@ -1,4 +1,5 @@
 const OtherIncome = require("../models/otherIncome.model");
+const { todayBusinessDate, businessWindow } = require("../services/businessDay");
 const PostingSettings = require("../models/postingSettings.model");
 const db = require("../models/db");
 
@@ -97,7 +98,7 @@ exports.create = (req, res) => {
   }
 
   const data = {
-    incomeDate: req.body.incomeDate || new Date().toISOString().slice(0, 10),
+    incomeDate: req.body.incomeDate || todayBusinessDate(),
     amount,
     incomeAccountId,
     paymentMethod: req.body.paymentMethod === "bank" ? "bank" : "cash",
