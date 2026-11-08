@@ -14,13 +14,16 @@ function shiftCashExtras(dailyReceiptId, cb) {
     db.query(
       `SELECT COALESCE(SUM(amount), 0)
               - (SELECT COALESCE(SUM(totalRefundAmount), 0) FROM OrderReturns WHERE dailyReceiptId = ? AND refundMethod = 'cash') AS customerCash,
+              (SELECT COALESCE(SUM(t.amount), 0) FROM Tips t LEFT JOIN Orders o ON o.idOrder = t.orderId
+                 WHERE COALESCE(t.dailyReceiptId, o.dailyReceiptId) = ?) AS tipsCash,
               (SELECT COALESCE(SUM(jl.credit), 0) FROM JournalLines jl
                  JOIN JournalEntries je ON je.idJournalEntry = jl.journalEntryId
                  JOIN PostingSettings ps ON ps.name = 'default' AND jl.accountId = ps.cashAccountId
                WHERE je.sourceType = 'PURCHASE_RECEIPT' AND je.dailyReceiptId = ?) AS cashPurchases
        FROM CustomerReceipts WHERE dailyReceiptId = ? AND paymentMethod = 'cash'`,
-      [dailyReceiptId, dailyReceiptId, dailyReceiptId],
-      (crErr, crRows) => cb(oiErr, oiTotals, crErr ? 0 : parseFloat(crRows[0].customerCash || 0), crErr ? 0 : parseFloat(crRows[0].cashPurchases || 0))
+      [dailyReceiptId, dailyReceiptId, dailyReceiptId, dailyReceiptId],
+      // tips are kept in the drawer, so they count as cash in it
+      (crErr, crRows) => cb(oiErr, oiTotals, crErr ? 0 : parseFloat(crRows[0].customerCash || 0) + parseFloat(crRows[0].tipsCash || 0), crErr ? 0 : parseFloat(crRows[0].cashPurchases || 0))
     );
   });
 }

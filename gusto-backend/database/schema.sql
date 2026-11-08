@@ -659,6 +659,7 @@ CREATE TABLE IF NOT EXISTS `Tips` (
   `amount` decimal(10,2) NOT NULL,
   `accountId` int(11) DEFAULT NULL,
   `orderId` int(11) DEFAULT NULL,
+  `dailyReceiptId` int(11) DEFAULT NULL COMMENT 'shift the tip was taken in',
   `recordedBy` int(11) NOT NULL,
   `createdAt` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `updatedAt` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -728,7 +729,9 @@ INSERT IGNORE INTO `Accounts` (`idAccount`, `code`, `name`, `accountType`, `pare
 INSERT IGNORE INTO `Accounts` (`idAccount`, `code`, `name`, `accountType`, `parentId`, `isActive`, `createdAt`, `updatedAt`) VALUES (29,'6106','صيانة','EXPENSE',6,1,NOW(),NOW());
 INSERT IGNORE INTO `Accounts` (`idAccount`, `code`, `name`, `accountType`, `parentId`, `isActive`, `createdAt`, `updatedAt`) VALUES (30,'6108','مصاريف تشغيلية أخرى','EXPENSE',6,1,NOW(),NOW());
 
-INSERT IGNORE INTO `PostingSettings` (`idPosting`, `name`, `cashAccountId`, `bankAccountId`, `arAccountId`, `apAccountId`, `inventoryAccountId`, `cogsAccountId`, `wastageAccountId`, `salesBeveragesAccountId`, `salesDessertsAccountId`, `tipsAccountId`, `createdAt`) VALUES (1,'default',13,14,15,18,16,22,23,20,21,NULL,NOW());
+INSERT IGNORE INTO `Accounts` (`idAccount`, `code`, `name`, `accountType`, `parentId`, `isActive`, `createdAt`, `updatedAt`) VALUES (31,'2300','إكراميات مستحقة للموظفين','LIABILITY',2,1,NOW(),NOW());
+
+INSERT IGNORE INTO `PostingSettings` (`idPosting`, `name`, `cashAccountId`, `bankAccountId`, `arAccountId`, `apAccountId`, `inventoryAccountId`, `cogsAccountId`, `wastageAccountId`, `salesBeveragesAccountId`, `salesDessertsAccountId`, `tipsAccountId`, `createdAt`) VALUES (1,'default',13,14,15,18,16,22,23,20,21,31,NOW());
 
 INSERT IGNORE INTO `ExpenseCategories` (`idExpenseCategory`, `name`, `defaultAccountId`, `isActive`) VALUES (1,'ايجار',24,1);
 INSERT IGNORE INTO `ExpenseCategories` (`idExpenseCategory`, `name`, `defaultAccountId`, `isActive`) VALUES (2,'كهرباء',25,1);

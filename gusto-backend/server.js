@@ -15,12 +15,13 @@ const app = express();
 const corsOptions = {
   origin: function (origin, callback) {
     // Allow requests with no origin (like mobile apps or curl requests) or from allowed origins
-    const allowedOrigins = process.env.ALLOWED_ORIGINS?.split(",") || ["http://localhost:8080", "http://localhost:3128"];
-    if (!origin || allowedOrigins.includes(origin)) {
-      callback(null, true);
-    } else {
-      callback(null, true); // Allow all origins in development
-    }
+    // Other sites can't call the API from a browser; the app's own pages, the desktop app
+    // and the dev server can. Production: list the restaurant's address in ALLOWED_ORIGINS.
+    const allowedOrigins = process.env.ALLOWED_ORIGINS?.split(",").map((o) => o.trim()) || [
+      "http://localhost:8080", "http://localhost:8081", "http://localhost:3128",
+      "http://127.0.0.1:8080", "http://127.0.0.1:3128",
+    ];
+    callback(null, !origin || origin === "null" || allowedOrigins.includes(origin));
   },
   credentials: true,
   methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
@@ -98,7 +99,10 @@ require("./app/routes/payment.routes")(app);
 require("./app/routes/otherIncome.routes")(app);
 
 // Serve frontend static files from dist folder — cached for 1 day
-const frontendDistPath = path.join(__dirname, "gusto-frontend/dist");
+// The built web app: gusto-frontend/dist next to the backend (or a copy inside the backend folder)
+const fs = require("fs");
+const frontendDistPath = [path.join(__dirname, "../gusto-frontend/dist"), path.join(__dirname, "gusto-frontend/dist")]
+  .find((p) => fs.existsSync(path.join(p, "index.html"))) || path.join(__dirname, "../gusto-frontend/dist");
 app.use(express.static(frontendDistPath));
 
 // Catch-all handler: send back React/Vue app's index.html file for SPA routing
@@ -153,6 +157,13 @@ app.set("fingerprintConfig", {
   port: FINGERPRINT_PORT,
 });
 
+// Live updates are for logged-in staff only (they carry every new order)
+io.use((socket, next) => {
+  const token = socket.handshake.auth?.token;
+  if (!token) return next(new Error("unauthorized"));
+  require("jsonwebtoken").verify(token, process.env.JWT_SECRET, (err) => (err ? next(new Error("unauthorized")) : next()));
+});
+
 // Socket.IO connection handling
 io.on("connection", (socket) => {
   console.log("✅ Client connected:", socket.id);
@@ -164,6 +175,10 @@ io.on("connection", (socket) => {
   });
 
   // Join cashier room
+  socket.on("join_barista", () => {
+    socket.join("barista");
+  });
+
   socket.on("join_cashier", () => {
     socket.join("cashier");
     console.log("💰 Socket joined cashier room");

@@ -114,3 +114,85 @@ S.cashPurchaseFromDrawer = async () => {
   const r = await c.close(sh.idDailyReceipt, 10000);
   check("shift closes at 0 difference", r.status === 200 && +r.data.summary.discrepancy === 0, r.status + " " + r.data.summary?.discrepancy);
 };
+
+S.kitchenPortions = async () => {
+  console.log("Made-to-order dishes always sell; tracked portions can't be oversold");
+  const c = await ctx(); await c.shift();
+  const biryani = c.m("برياني دجاج"), kebab = c.m("كباب لحم");
+  await sql("DELETE FROM KitchenItemStock WHERE menuItemId = ?", [biryani.idMenuItem]);
+  check("dish without tracked portions sells (made to order)", (await c.order([[biryani, 3]])).status === 200);
+  await sql("UPDATE KitchenItemStock SET quantity = 1 WHERE menuItemId = ?", [kebab.idMenuItem]);
+  const [a, b] = await Promise.all([c.order([[kebab, 1]]), c.order([[kebab, 1]])]);
+  check("two cashiers, last kebab: exactly one sale", [a.status, b.status].sort().join() === "200,400", `${a.status}/${b.status}`);
+  check("portions never negative", (await one("SELECT quantity FROM KitchenItemStock WHERE menuItemId=?", [kebab.idMenuItem])) === 0);
+};
+
+S.stockEditing = async () => {
+  console.log("Editing an ingredient never changes stock; waste is valued and can't go negative");
+  const c = await ctx(); await c.shift(); const ST = await login("storage@gusto.com");
+  const id = await one("SELECT idIngredient FROM Ingredients WHERE ingredientName='طماطم'"); // 30 kg @ 1,000
+  await call("PUT", `/inventory/${id}`, { ingredientName: "طماطم", unit: "kg", currentStock: 999, minStock: 5, maxStock: 60, costPerUnit: 1000 }, ST);
+  check("edit with currentStock 999 leaves stock at 30", +(await one("SELECT currentStock FROM Ingredients WHERE idIngredient=?", [id])) === 30);
+  let r = await call("PATCH", `/inventory/${id}/adjust-stock`, { transactionType: "waste", quantity: 2 }, ST);
+  check("waste 2 kg: stock 28, valued 2,000 at the average cost", r.status === 200 && +r.data.currentStock === 28 && r.data.totalCost === 2000, JSON.stringify(r.data));
+  r = await call("PATCH", `/inventory/${id}/adjust-stock`, { transactionType: "waste", quantity: 100 }, ST);
+  check("wasting more than in stock refused", r.status === 400, r.status + " " + r.data.message);
+  check("unknown movement type refused", (await call("PATCH", `/inventory/${id}/adjust-stock`, { transactionType: "purchase", quantity: 5 }, ST)).status === 400);
+  const sh = await c.shift();
+  await c.close(sh.idDailyReceipt, 0);
+  const L = await c.shiftLines(sh.idDailyReceipt);
+  check("shift posts the 2,000 waste (Dr 5103)", c.sumBy(L, "5103", "debit") === 2000, String(c.sumBy(L, "5103", "debit")));
+};
+
+S.publicMenu = async () => {
+  console.log("The public menu shows dishes but not recipes or costs");
+  const kebabId = await one("SELECT idMenuItem FROM MenuItems WHERE itemName='كباب لحم'");
+  const pub = await call("GET", `/menu/${kebabId}`);
+  check("visitor sees the dish without recipes", pub.status === 200 && pub.data.itemName === "كباب لحم" && pub.data.recipes === undefined);
+  const staff = await call("GET", `/menu/${kebabId}`, null, await login("admin@gusto.com", "admin123"));
+  check("staff still see recipes", Array.isArray(staff.data.recipes) && staff.data.recipes.length > 0);
+  await sql("UPDATE MenuItems SET isActive = 0 WHERE idMenuItem = ?", [kebabId]);
+  check("visitor can't see an inactive dish", (await call("GET", `/menu/${kebabId}`)).status === 404);
+};
+
+S.staffManagement = async () => {
+  console.log("Staff: edits save, passwords reset, history kept, admins can't lock themselves out");
+  const c = await ctx(); await c.shift(); const A = c.A;
+  const cashierId = await one("SELECT idStaff FROM Staff WHERE email='cashier@gusto.com'");
+  let r = await call("PUT", `/staff/${cashierId}`, { fullName: "الكاشير", phone: "1", role: "cashier", salary: 1, isActive: true, email: "cash2@gusto.com", hireDate: "2026-01-15", password: "newpass1" }, A);
+  check("email, hire date and password saved", r.status === 200 && (await one("SELECT email FROM Staff WHERE idStaff=?", [cashierId])) === "cash2@gusto.com" && (await one("SELECT hireDate FROM Staff WHERE idStaff=?", [cashierId])) === "2026-01-15" && !!(await login("cash2@gusto.com", "newpass1")), r.status + " " + JSON.stringify(r.data).slice(0, 150) + " " + (await one("SELECT hireDate FROM Staff WHERE idStaff=?", [cashierId])));
+  check("no password hash in responses", r.data.password === undefined && (await call("GET", `/staff/${cashierId}`, null, A)).data.password === undefined);
+  check("invalid role refused", (await call("PUT", `/staff/${cashierId}`, { fullName: "x", role: "bartender", isActive: true }, A)).status === 400);
+  check("admin can't demote themselves", (await call("PUT", "/staff/1", { fullName: "Admin", role: "cashier", isActive: true }, A)).status === 400);
+  await c.order([[c.m("فتوش"), 1]], { token: await login("cash2@gusto.com", "newpass1") });
+  r = await call("DELETE", `/staff/${cashierId}`, null, A);
+  check("deleting someone with orders deactivates them", r.data.deactivated === true && (await one("SELECT isActive FROM Staff WHERE idStaff=?", [cashierId])) === 0);
+  const waiterId = await one("SELECT idStaff FROM Staff WHERE email='waiter@gusto.com'");
+  check("unused account really deleted", (await call("DELETE", `/staff/${waiterId}`, null, A)).status === 200 && (await one("SELECT COUNT(*) FROM Staff WHERE idStaff=?", [waiterId])) === 0);
+};
+
+S.tips = async () => {
+  console.log("Tips: in the drawer and the books of their shift, positive only");
+  const c = await ctx(); const sh = await c.shift(); const C = await login("cashier@gusto.com");
+  check("negative tip refused", (await call("POST", "/tips", { tipDate: today(), amount: -500 }, C)).status === 400);
+  check("tip without an order recorded", (await call("POST", "/tips", { tipDate: today(), amount: 2000 }, C)).status === 201);
+  check("drawer expects the 2,000 tip", +(await c.shift()).expectedCash === 2000, String((await c.shift()).expectedCash));
+  const r = await c.close(sh.idDailyReceipt, 2000);
+  check("closes at 0 difference", r.status === 200 && +r.data.summary.discrepancy === 0, r.status + " " + r.data.summary?.discrepancy);
+  const L = await c.shiftLines(sh.idDailyReceipt);
+  check("tip posted (Dr cash 2,000)", c.sumBy(L, "1101", "debit") === 2000, JSON.stringify(L));
+  const tipId = await one("SELECT idTip FROM Tips LIMIT 1");
+  check("tip in a closed shift can't be edited", (await call("PUT", `/tips/${tipId}`, { amount: 1 }, c.A)).status === 400);
+};
+
+S.sizeDeleteKeepsHistory = async () => {
+  console.log("Deleting a size deactivates it; past orders keep it");
+  const c = await ctx(); await c.shift();
+  const juice = c.m("عصير برتقال طازج");
+  const large = await one("SELECT idItemSize FROM ItemSizes WHERE menuItemId=? AND sizeName='كبير'", [juice.idMenuItem]);
+  const X = (await c.order([[juice, 1, 4000, large]])).data.orderId;
+  await call("DELETE", `/item-sizes/${large}`, null, c.A);
+  check("order line still points at the size", (await one("SELECT itemSizeId FROM OrderItems WHERE orderId=?", [X])) === large);
+  check("size hidden from the menu", !(await call("GET", `/item-sizes/menu-item/${juice.idMenuItem}`)).data.some((z) => z.idItemSize === large));
+  check("new orders with it refused", (await c.order([[juice, 1, 4000, large]])).status === 400);
+};

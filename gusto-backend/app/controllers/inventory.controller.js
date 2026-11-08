@@ -92,44 +92,50 @@ exports.update = (req, res) => {
   });
 };
 
+// Manual stock change on the main store, in one locked transaction:
+//   usage / waste → always take out; adjustment → signed (+ adds, − removes)
+// Stock can't go below zero. Cost defaults to the ingredient's average cost, and the
+// movement is tied to the open shift so its waste/usage is posted when the shift closes.
 exports.adjustStock = (req, res) => {
-  if (!req.body.quantity || !req.body.transactionType) {
-    return res.status(400).json({
-      message: "Quantity and transaction type are required!"
-    });
-  }
+  const TYPES = ["usage", "waste", "adjustment"];
+  const type = req.body.transactionType;
+  const raw = Number(req.body.quantity);
+  if (!TYPES.includes(type)) return res.status(400).json({ message: "نوع العملية غير صحيح" });
+  if (!Number.isFinite(raw) || raw === 0) return res.status(400).json({ message: "الكمية يجب أن تكون رقماً غير الصفر" });
+  const quantity = type === "adjustment" ? raw : -Math.abs(raw);
+  const db = require("../models/db");
 
-  // Update stock
-  Ingredient.updateStock(req.params.id, req.body.quantity, (err, data) => {
-    if (err) {
-      if (err.kind === "not_found") {
-        return res.status(404).json({
-          message: `Ingredient not found with id ${req.params.id}.`
+  db.getConnection((errConn, conn) => {
+    if (errConn) return res.status(500).json({ message: errConn.message });
+    const fail = (status, message) => conn.rollback(() => { conn.release(); res.status(status).json({ message }); });
+    conn.beginTransaction((errTx) => {
+      if (errTx) { conn.release(); return res.status(500).json({ message: errTx.message }); }
+      conn.query("SELECT idIngredient, currentStock, costPerUnit FROM Ingredients WHERE idIngredient = ? FOR UPDATE", [req.params.id], (e1, rows) => {
+        if (e1) return fail(500, e1.message);
+        if (!rows.length) return fail(404, `Ingredient not found with id ${req.params.id}.`);
+        const ing = rows[0];
+        const after = Number(ing.currentStock) + quantity;
+        if (after < -0.0005) return fail(400, `المخزون غير كافٍ: المتوفر ${Number(ing.currentStock)}`);
+        const unitCost = Number(req.body.costPerUnit) > 0 ? Number(req.body.costPerUnit) : Number(ing.costPerUnit) || 0;
+        const totalCost = Math.round((type === "adjustment" ? quantity : Math.abs(quantity)) * unitCost * 100) / 100;
+        conn.query("UPDATE Ingredients SET currentStock = currentStock + ? WHERE idIngredient = ?", [quantity, ing.idIngredient], (e2) => {
+          if (e2) return fail(500, e2.message);
+          conn.query(
+            `INSERT INTO InventoryTransactions (ingredientId, transactionType, quantity, costPerUnit, totalCost, orderId, dailyReceiptId, recordedBy, notes)
+             VALUES (?, ?, ?, ?, ?, NULL, (SELECT idDailyReceipt FROM DailyReceipts WHERE isClosed = 0 ORDER BY idDailyReceipt DESC LIMIT 1), ?, ?)`,
+            [ing.idIngredient, type, quantity, unitCost, totalCost, req.userId, req.body.notes || null],
+            (e3) => {
+              if (e3) return fail(500, e3.message);
+              conn.commit((e4) => {
+                if (e4) return fail(500, e4.message);
+                conn.release();
+                res.json({ message: "Stock adjusted successfully", currentStock: after, totalCost });
+              });
+            }
+          );
         });
-      }
-      return res.status(500).json({
-        message: "Error updating stock for ingredient " + req.params.id
       });
-    }
-
-    // Record transaction
-    const transaction = {
-      ingredientId: req.params.id,
-      transactionType: req.body.transactionType,
-      quantity: req.body.quantity,
-      costPerUnit: req.body.costPerUnit || null,
-      totalCost: req.body.totalCost || null,
-      recordedBy: req.userId,
-      notes: req.body.notes || null
-    };
-
-    InventoryTransaction.create(transaction, (err) => {
-      if (err) {
-        console.error("Error creating inventory transaction:", err);
-      }
     });
-
-    res.json({ message: "Stock adjusted successfully" });
   });
 };
 

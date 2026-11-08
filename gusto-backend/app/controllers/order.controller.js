@@ -71,14 +71,7 @@ const deductInventoryForOrder = (orderId, orderItems, callback, dailyReceiptId =
       // Harmony items have no ingredient link; their stock is managed by hand.
       // (The old code deducted ingredient #menuItemId, i.e. an unrelated ingredient.)
 
-      // Food: also count down the ready portions
-      if (menuItem.isKitchen) {
-        KitchenItemStock.decrease(menuItem.idMenuItem, item.quantity, (errK) => {
-          if (errK) console.error(`Kitchen stock decrease for ${menuItem.itemName}:`, errK.message);
-          finishItem();
-        });
-        return;
-      }
+      // (ready portions were already taken when the order was saved)
       finishItem();
     });
   });
@@ -125,53 +118,49 @@ const deductInventoryForOrder = (orderId, orderItems, callback, dailyReceiptId =
 // ============================================================================
 // VALIDATE KITCHEN STOCK (before creating order)
 // ============================================================================
-const validateKitchenStock = (orderItems, callback) => {
+// Kitchen dishes the kitchen tracks as ready portions (they have a KitchenItemStock row) are
+// limited by those portions; dishes without a row are made to order and always sellable.
+// The portions are taken atomically (guarded UPDATE), so two cashiers can't both sell the last one.
+// Calls back (err, release) — release() gives the portions back if the order isn't saved.
+const reserveKitchenPortions = (orderItems, callback) => {
   const byId = {};
   orderItems.forEach((item) => {
-    const id = item.menuItemId;
-    const qty = Math.max(0, parseInt(item.quantity, 10) || 0);
-    byId[id] = (byId[id] || 0) + qty;
+    byId[item.menuItemId] = (byId[item.menuItemId] || 0) + (parseInt(item.quantity, 10) || 0);
   });
   const ids = Object.keys(byId).map(Number).filter(Boolean);
-  if (ids.length === 0) return callback(null);
-
-  let processed = 0;
-  let validationError = null;
-
-  function done() {
-    processed++;
-    if (processed < ids.length) return;
-    callback(validationError);
-  }
-
-  ids.forEach((menuItemId) => {
-    MenuItem.getWithRecipes(menuItemId, (err, menuItem) => {
-      if (err) {
-        validationError = err;
-        done();
-        return;
-      }
-      if (!menuItem || !menuItem.isKitchen) {
-        done();
-        return;
-      }
-      const requested = byId[menuItemId];
-      KitchenItemStock.getByMenuItem(menuItemId, (errK, stock) => {
-        if (errK) {
-          validationError = errK;
-          done();
-          return;
-        }
-        const available = stock && stock.quantity != null ? Number(stock.quantity) : 0;
-        if (requested > available) {
-          validationError = new Error(
-            `الكمية غير متوفرة لـ "${menuItem.itemName}" في مخزن المطبخ. المتوفر: ${available}، المطلوب: ${requested}.`
-          );
-        }
-        done();
-      });
-    });
-  });
+  const noop = () => {};
+  if (!ids.length) return callback(null, noop);
+  const db = require("../models/db");
+  db.query(
+    `SELECT k.menuItemId, k.quantity, m.itemName FROM KitchenItemStock k
+     JOIN MenuItems m ON m.idMenuItem = k.menuItemId
+     JOIN Categories c ON c.idCategory = m.categoryId
+     WHERE k.menuItemId IN (?) AND c.isKitchen = 1`,
+    [ids],
+    (err, tracked) => {
+      if (err) return callback(err);
+      const taken = [];
+      const release = () => taken.forEach(([id, q]) => db.query("UPDATE KitchenItemStock SET quantity = quantity + ? WHERE menuItemId = ?", [q, id]));
+      const next = (i) => {
+        if (i >= tracked.length) return callback(null, release);
+        const row = tracked[i];
+        const want = byId[row.menuItemId];
+        db.query(
+          "UPDATE KitchenItemStock SET quantity = quantity - ? WHERE menuItemId = ? AND quantity >= ?",
+          [want, row.menuItemId, want],
+          (errU, r) => {
+            if (errU || !r.affectedRows) {
+              release();
+              return callback(errU || new Error(`الكمية غير متوفرة لـ "${row.itemName}" في مخزن المطبخ. المتوفر: ${row.quantity}، المطلوب: ${want}.`));
+            }
+            taken.push([row.menuItemId, want]);
+            next(i + 1);
+          }
+        );
+      };
+      next(0);
+    }
+  );
 };
 
 // ============================================================================
@@ -301,13 +290,7 @@ exports.create = async (req, res) => {
     }
 
     // Validate kitchen stock before creating order (prevent over-selling)
-    validateKitchenStock(req.body.orderItems, async (validateErr) => {
-      if (validateErr) {
-        return res.status(400).json({
-          message: validateErr.message || "Insufficient kitchen stock.",
-          code: "INSUFFICIENT_KITCHEN_STOCK"
-        });
-      }
+    (async () => {
 
     const orderNumber = `ORD-${Date.now()}`;
 
@@ -352,8 +335,16 @@ exports.create = async (req, res) => {
       customerPhone: req.body.customerPhone || null
     };
 
+    reserveKitchenPortions(req.body.orderItems, (portionErr, releasePortions) => {
+      if (portionErr) {
+        return res.status(400).json({
+          message: portionErr.message || "Insufficient kitchen stock.",
+          code: "INSUFFICIENT_KITCHEN_STOCK"
+        });
+      }
     Order.create(order, req.body.orderItems, (err, data) => {
       if (err) {
+        releasePortions();
         return res.status(500).json({
           message: err.message || "Error creating order."
         });
@@ -401,6 +392,7 @@ exports.create = async (req, res) => {
       }, openShift.idDailyReceipt);
     });
     });
+    })();
   });
 };
 

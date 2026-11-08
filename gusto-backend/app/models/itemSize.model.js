@@ -55,7 +55,8 @@ ItemSize.update = (id, itemSize, result) => {
 
 // Delete size
 ItemSize.delete = (id, result) => {
-  db.query("DELETE FROM ItemSizes WHERE idItemSize = ?", [id], (err, res) => {
+  // Deactivated, not deleted: past orders and size recipes keep pointing at it
+  db.query("UPDATE ItemSizes SET isActive = 0 WHERE idItemSize = ?", [id], (err, res) => {
     if (err) {
       result(err, null);
       return;

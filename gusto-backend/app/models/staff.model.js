@@ -59,10 +59,18 @@ Staff.getAll = (result) => {
   });
 };
 
+Staff.ROLES = ["admin", "supervisor", "cashier", "kitchen", "waiter", "purchases", "storage"];
+
+// Updates the editable fields; a new password is hashed and saved only when one is given
 Staff.updateById = (id, staff, result) => {
+  const fields = { fullName: staff.fullName, phone: staff.phone, role: staff.role, salary: staff.salary, isActive: staff.isActive };
+  if (staff.email !== undefined) fields.email = staff.email;
+  if (staff.hireDate) fields.hireDate = String(staff.hireDate).slice(0, 10);
+  if (staff.password) fields.password = require("bcryptjs").hashSync(staff.password, 10);
+  Object.keys(fields).forEach((k) => fields[k] === undefined && delete fields[k]);
   db.query(
-    "UPDATE Staff SET fullName = ?, phone = ?, role = ?, salary = ?, isActive = ? WHERE idStaff = ?",
-    [staff.fullName, staff.phone, staff.role, staff.salary, staff.isActive, id],
+    "UPDATE Staff SET ? WHERE idStaff = ?",
+    [fields, id],
     (err, res) => {
       if (err) {
         result(err, null);
@@ -91,8 +99,26 @@ Staff.updateLastLogin = (id, result) => {
   );
 };
 
+// Someone with orders, shifts or other records is deactivated instead of deleted,
+// so the history keeps its names; only an unused account is really deleted
 Staff.remove = (id, result) => {
-  db.query("DELETE FROM Staff WHERE idStaff = ?", [id], (err, res) => {
+  db.query(
+    `SELECT (SELECT COUNT(*) FROM Orders WHERE cashierId = ?) + (SELECT COUNT(*) FROM DailyReceipts WHERE openedBy = ? OR closedBy = ?)
+          + (SELECT COUNT(*) FROM Expenses WHERE recordedBy = ?) + (SELECT COUNT(*) FROM Purchases WHERE createdBy = ?) AS uses`,
+    [id, id, id, id, id],
+    (errUse, rows) => {
+      if (errUse) return result(errUse, null);
+      if (Number(rows[0].uses) > 0) {
+        return db.query("UPDATE Staff SET isActive = 0 WHERE idStaff = ?", [id], (errD, r) => {
+          if (errD) return result(errD, null);
+          if (!r.affectedRows) return result({ kind: "not_found" }, null);
+          result(null, { deactivated: true });
+        });
+      }
+      deleteStaff();
+    }
+  );
+  const deleteStaff = () => db.query("DELETE FROM Staff WHERE idStaff = ?", [id], (err, res) => {
     if (err) {
       result(err, null);
       return;

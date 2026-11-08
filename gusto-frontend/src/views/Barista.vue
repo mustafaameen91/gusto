@@ -276,8 +276,8 @@ onMounted(() => {
     currentTime.value = format(new Date(), 'HH:mm:ss')
   }, 1000)
   const socketUrl = import.meta.env.VITE_API_URL || (import.meta.env.DEV ? 'http://localhost:3128' : window.location.origin)
-  socket = io(socketUrl, { transports: ['websocket', 'polling'] })
-  socket.on('connect', () => socket.emit('join_kitchen'))
+  socket = io(socketUrl, { transports: ['websocket', 'polling'], auth: { token: localStorage.getItem('gusto_token') } })
+  socket.on('connect', () => { socket.emit('join_kitchen'); socket.emit('join_barista') })
   socket.on('new_order', (data) => {
     toast.info(`طلب جديد #${data.orderNumber}`)
     loadActiveOrders()

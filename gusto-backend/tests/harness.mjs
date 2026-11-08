@@ -21,6 +21,7 @@ const dbConfig = {
   password: String(env.password || env.DB_PASSWORD || "").replace(/'/g, ""),
   port: Number(String(env.port || env.DB_PORT || 3306).replace(/'/g, "")),
   multipleStatements: true,
+  dateStrings: ["DATE"],
 };
 
 let conn;

@@ -54,8 +54,26 @@ exports.findAll = (req, res) => {
   });
 };
 
+// The menu is public (QR menu). Recipes and ingredient costs are only for logged-in staff,
+// and visitors don't see inactive items.
+const isStaffRequest = (req) => {
+  const token = req.headers["authorization"]?.split(" ")[1];
+  if (!token) return false;
+  try {
+    require("jsonwebtoken").verify(token, process.env.JWT_SECRET);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
 exports.findOne = (req, res) => {
   MenuItem.getWithRecipes(req.params.id, (err, data) => {
+    if (!err && !isStaffRequest(req)) {
+      if (!data.isActive) return res.status(404).json({ message: `Menu item not found with id ${req.params.id}.` });
+      const { recipes, ...publicItem } = data;
+      return res.json(publicItem);
+    }
     if (err) {
       if (err.kind === "not_found") {
         return res.status(404).json({

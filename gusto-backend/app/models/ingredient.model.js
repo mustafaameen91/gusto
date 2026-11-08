@@ -72,10 +72,8 @@ Ingredient.updateById = (id, ingredient, result) => {
     updates.push('unit = ?');
     values.push(ingredient.unit);
   }
-  if (ingredient.currentStock !== undefined) {
-    updates.push('currentStock = ?');
-    values.push(ingredient.currentStock);
-  }
+  // Stock is never set by editing: it only moves through purchases, transfers, sales and
+  // stock adjustments, each of which records a movement (an edit form could overwrite a newer figure)
   if (ingredient.minStock !== undefined) {
     updates.push('minStock = ?');
     values.push(ingredient.minStock);

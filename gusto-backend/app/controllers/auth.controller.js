@@ -67,6 +67,14 @@ exports.register = (req, res) => {
     });
   }
 
+  const Staff = require("../models/staff.model");
+  if (req.body.role && !Staff.ROLES.includes(req.body.role)) {
+    return res.status(400).json({ message: "الدور غير صحيح" });
+  }
+  if (!req.body.password || String(req.body.password).length < 6) {
+    return res.status(400).json({ message: "كلمة المرور يجب أن تكون 6 أحرف على الأقل" });
+  }
+
   // Hash password
   const hashedPassword = bcrypt.hashSync(req.body.password, 10);
 
@@ -83,6 +91,7 @@ exports.register = (req, res) => {
 
   Staff.create(newStaff, (err, data) => {
     if (err) {
+      if (err.code === "ER_DUP_ENTRY") return res.status(400).json({ message: "البريد الإلكتروني مستخدم لموظف آخر" });
       return res.status(500).json({
         message: err.message || "Error creating user."
       });

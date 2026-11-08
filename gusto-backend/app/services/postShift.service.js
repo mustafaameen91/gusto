@@ -290,7 +290,8 @@ function postShift(dailyReceiptId, postedBy, result) {
                                       // Tips for this shift (tips linked to orders in shift)
                                       conn.query(
                                         `SELECT COALESCE(SUM(t.amount), 0) AS totalTips
-                                         FROM Tips t INNER JOIN Orders o ON t.orderId = o.idOrder WHERE o.dailyReceiptId = ?`,
+                                         FROM Tips t LEFT JOIN Orders o ON t.orderId = o.idOrder
+                                         WHERE COALESCE(t.dailyReceiptId, o.dailyReceiptId) = ?`,
                                         [dailyReceiptId],
                                         (errTips, tipsRows) => {
                                           if (errTips) {
@@ -306,7 +307,8 @@ function postShift(dailyReceiptId, postedBy, result) {
                                              FROM InventoryTransactions it
                                              LEFT JOIN Orders o ON it.orderId = o.idOrder
                                              WHERE it.transactionType = 'waste' AND it.totalCost IS NOT NULL
-                                               AND (o.dailyReceiptId = ? OR (it.orderId IS NULL AND ? IS NOT NULL AND DATE(it.transactionDate) = ?))`,
+                                               AND (COALESCE(it.dailyReceiptId, o.dailyReceiptId) = ?
+                                                    OR (it.dailyReceiptId IS NULL AND it.orderId IS NULL AND ? IS NOT NULL AND DATE(it.transactionDate) = ?))`,
                                             [dailyReceiptId, receiptDate, receiptDate],
                                             (errWaste, wasteRows) => {
                                               if (errWaste) {
