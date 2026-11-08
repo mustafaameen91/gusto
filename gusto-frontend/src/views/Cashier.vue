@@ -28,11 +28,11 @@
                 type="button"
                 class="pos-waiter-btn"
                 :class="{ 'pos-waiter-btn--has': waitingOrders.length > 0 }"
-                :aria-label="`طلبات النُدُل: ${waitingOrders.length} بانتظار الكاشير`"
+                :aria-label="`طلبات النادل: ${waitingOrders.length} بانتظار الكاشير`"
                 @click="openWaiterOrders"
               >
                 <PhBellRinging :size="20" weight="bold" />
-                <span class="pos-waiter-btn__label">طلبات النُدُل</span>
+                <span class="pos-waiter-btn__label">طلبات النادل</span>
                 <span class="pos-waiter-btn__badge" aria-hidden="true">{{ waitingOrders.length }}</span>
               </button>
             </div>
@@ -283,7 +283,7 @@
     <v-dialog v-model="showWaiterOrders" max-width="600" scrollable>
       <div class="pos-dialog pos-wo">
         <header class="pos-dialog__head">
-          <h3>طلبات النُدُل ({{ waitingOrders.length }})</h3>
+          <h3>طلبات النادل ({{ waitingOrders.length }})</h3>
           <div class="pos-wo__head-actions">
             <button type="button" class="pos-dialog__close" aria-label="تحديث القائمة" title="تحديث" :disabled="waiterOrdersLoading" @click="loadWaiterOrders()">
               <PhArrowsClockwise :size="20" weight="bold" :class="{ 'pos-wo__spin': waiterOrdersLoading }" />

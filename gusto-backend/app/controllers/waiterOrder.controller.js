@@ -94,7 +94,7 @@ exports.list = async (req, res) => {
         : await q(`${SELECT} WHERE w.status = ? ORDER BY w.idWaiterOrder ASC LIMIT 100`, [status]);
     res.json(rows.map(parseRow));
   } catch (e) {
-    res.status(500).json({ message: "تعذّر تحميل طلبات النُدُل" });
+    res.status(500).json({ message: "تعذّر تحميل طلبات النادل" });
   }
 };
 
