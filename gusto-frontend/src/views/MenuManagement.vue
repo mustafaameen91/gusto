@@ -252,6 +252,8 @@
                         variant="text"
                         @click="deleteItem(item)"
                         style="color: #DC2626;"
+                        :aria-label="`حذف ${item.itemName}`"
+                        :title="`حذف ${item.itemName}`"
                       >
                         <PhTrash :size="16" weight="bold" />
                       </v-btn>
@@ -360,6 +362,8 @@
                     variant="text"
                     color="error"
                     @click="deleteItem(item)"
+                    :aria-label="`حذف ${item.itemName}`"
+                    :title="`حذف ${item.itemName}`"
                   >
                     <PhTrash :size="18" weight="bold" />
                   </v-btn>
@@ -423,6 +427,8 @@
                     variant="text"
                     color="primary"
                     @click="editCategory(item)"
+                    :aria-label="`تعديل التصنيف ${item.categoryName}`"
+                    :title="`تعديل التصنيف ${item.categoryName}`"
                   >
                     <PhPencilSimple :size="18" weight="bold" />
                   </v-btn>
@@ -432,6 +438,8 @@
                     variant="text"
                     color="error"
                     @click="deleteCategory(item)"
+                    :aria-label="`حذف التصنيف ${item.categoryName}`"
+                    :title="`حذف التصنيف ${item.categoryName}`"
                   >
                     <PhTrash :size="18" weight="bold" />
                   </v-btn>
@@ -745,6 +753,8 @@
                     variant="text"
                     color="error"
                     @click="deleteSize(size)"
+                    :aria-label="`إيقاف الحجم ${size.sizeName}`"
+                    :title="`إيقاف الحجم ${size.sizeName}`"
                         >
                           <PhTrash :size="20" weight="bold" />
                         </v-btn>
@@ -763,70 +773,63 @@
               </v-card>
             </v-window-item>
 
-            <!-- Tab 3: Recipe Management (Size-based) -->
+            <!-- Tab 3: Recipe Management (base recipe + optional per-size recipes) -->
             <v-window-item value="recipe">
-              <!-- No Sizes Warning -->
-              <v-alert 
-                v-if="itemSizes.length === 0"
-                type="warning" 
-                variant="tonal" 
-                prominent
-                class="mb-4"
-              >
-                <div class="d-flex align-center justify-space-between">
-                  <div>
-                    <div class="font-weight-bold mb-2">⚠️ لا يمكن إضافة وصفة بدون أحجام!</div>
-                    <p class="mb-0">يجب إضافة حجم واحد على الأقل (مثل: صغير، وسط، كبير) قبل إنشاء الوصفة.</p>
-                  </div>
-                  <v-btn 
-                    color="orange" 
-                    variant="elevated"
-                    @click="itemDialogTab = 'sizes'"
-                  >
-                    إضافة أحجام
-                  </v-btn>
-                </div>
+              <v-alert type="info" variant="tonal" class="mb-4">
+                <strong>💡 كيف تعمل الوصفة:</strong>
+                الوصفة الأساسية تُستخدم لكل الأحجام. إذا أضفت وصفة خاصة لحجم معيّن تُستخدم بدلاً من الأساسية عند بيع هذا الحجم.
+                <span v-if="itemSizes.length === 0">هذا الصنف بدون أحجام، لذلك تكفي الوصفة الأساسية.</span>
               </v-alert>
 
-              <div v-else>
-                <v-alert type="success" variant="tonal" class="mb-4">
-                  <strong>💡 وصفة لكل حجم:</strong> كل حجم له وصفة خاصة. سيتم خصم الكمية المناسبة تلقائياً حسب الحجم المطلوب.
-                </v-alert>
+              <v-alert v-if="recipesDirty" type="warning" variant="tonal" density="compact" class="mb-4">
+                لديك تغييرات غير محفوظة — اضغط "حفظ الوصفات" لحفظها.
+              </v-alert>
 
-                <!-- Size Selector for Recipe -->
-                <v-card elevation="2" class="pa-4 mb-4" rounded="lg" style="background: #e8f5e9; border: 2px solid #84967A;">
-                  <div class="d-flex align-center ga-3 mb-3">
-                    <PhResize :size="24" weight="bold" color="#84967A" />
-                    <span class="text-h6 font-weight-bold" style="color: #84967A;">اختر الحجم:</span>
-                  </div>
-                  <v-btn-toggle
-                    v-model="selectedRecipeSize"
-                    mandatory
-                    color="success"
-                    variant="outlined"
-                    divided
-                    rounded="lg"
+              <!-- Recipe selector: base + sizes -->
+              <v-card elevation="2" class="pa-4 mb-4" rounded="lg" style="background: #e8f5e9; border: 2px solid #84967A;">
+                <div class="d-flex align-center ga-3 mb-3">
+                  <PhResize :size="24" weight="bold" color="#84967A" />
+                  <span class="text-h6 font-weight-bold" style="color: #84967A;">اختر الوصفة:</span>
+                </div>
+                <v-btn-toggle
+                  v-model="selectedRecipeSize"
+                  mandatory
+                  color="success"
+                  variant="outlined"
+                  divided
+                  rounded="lg"
+                  style="flex-wrap: wrap; height: auto;"
+                >
+                  <v-btn :value="BASE_RECIPE_KEY" class="px-6" size="large">
+                    <PhCookingPot :size="18" weight="bold" class="ml-2" />
+                    {{ baseRecipeLabel }}
+                    <v-chip size="x-small" class="mr-2" variant="tonal">{{ (allRecipes[BASE_RECIPE_KEY] || []).length }}</v-chip>
+                  </v-btn>
+                  <v-btn
+                    v-for="size in itemSizes"
+                    :key="size.idItemSize"
+                    :value="size.idItemSize"
+                    class="px-6"
+                    size="large"
                   >
-                    <v-btn 
-                      v-for="size in itemSizes" 
-                      :key="size.idItemSize"
-                      :value="size.idItemSize"
-                      class="px-8"
-                      size="large"
-                    >
-                      <PhResize :size="18" weight="bold" class="ml-2" />
-                      {{ size.sizeName }}
-                    </v-btn>
-                  </v-btn-toggle>
-                  <p class="text-caption text-grey mt-3 mb-0">
-                    <strong>الوصفة الحالية:</strong> {{ itemSizes.find(s => s.idItemSize === selectedRecipeSize)?.sizeName }} 
-                    (السعر: {{ (Number(selectedMenuItem?.basePrice || 0) + Number(itemSizes.find(s => s.idItemSize === selectedRecipeSize)?.priceAdjustment || 0)).toLocaleString() }} د.ع)
-                  </p>
-                </v-card>
+                    <PhResize :size="18" weight="bold" class="ml-2" />
+                    {{ size.sizeName }}
+                    <v-chip size="x-small" class="mr-2" variant="tonal">
+                      {{ sizeHasOwnRecipe(size.idItemSize) ? allRecipes[size.idItemSize].length : 'أساسية' }}
+                    </v-chip>
+                  </v-btn>
+                </v-btn-toggle>
+                <p class="text-caption text-grey mt-3 mb-0">
+                  <strong>الوصفة الحالية:</strong> {{ selectedRecipeLabel }}
+                  <template v-if="!isBaseRecipeSelected">
+                    (السعر: {{ selectedSizePrice.toLocaleString() }} د.ع)
+                  </template>
+                </p>
+              </v-card>
 
               <!-- Add Ingredient Form -->
-              <v-card v-if="itemSizes.length > 0" elevation="2" class="pa-4 mb-5" rounded="lg" style="background: var(--t-surface-high);">
-                <div class="text-h6 font-weight-bold mb-4">➕ إضافة مكون للوصفة</div>
+              <v-card elevation="2" class="pa-4 mb-5" rounded="lg" style="background: var(--t-surface-high);">
+                <div class="text-h6 font-weight-bold mb-4">➕ إضافة مكون إلى {{ selectedRecipeLabel }}</div>
                 <v-row>
                   <v-col cols="12" md="6">
                     <v-autocomplete
@@ -848,7 +851,7 @@
                         </v-list-item>
                       </template>
                     </v-autocomplete>
-            </v-col>
+                  </v-col>
                   <v-col cols="12" md="4">
                     <v-text-field
                       v-model.number="recipeForm.quantityNeeded"
@@ -861,8 +864,8 @@
                       :hint="unitConversionHint"
                       persistent-hint
                       color="success"
-              />
-            </v-col>
+                    />
+                  </v-col>
                   <v-col cols="12" md="2" class="d-flex align-center">
                     <v-btn
                       color="success"
@@ -870,19 +873,21 @@
                       :loading="saving"
                       block
                       size="large"
+                      aria-label="إضافة المكون إلى الوصفة"
+                      title="إضافة المكون إلى الوصفة"
                     >
                       <PhPlus :size="20" weight="bold" />
                     </v-btn>
-            </v-col>
-          </v-row>
+                  </v-col>
+                </v-row>
               </v-card>
 
-              <!-- Current Recipe for Selected Size -->
-              <div v-if="itemSizes.length > 0" class="text-h6 font-weight-bold mb-3">
-                🍳 المكونات - {{ itemSizes.find(s => s.idItemSize === selectedRecipeSize)?.sizeName }}
+              <!-- Current lines of the selected recipe -->
+              <div class="text-h6 font-weight-bold mb-3">
+                🍳 المكونات - {{ selectedRecipeLabel }}
               </div>
-              
-              <div v-if="itemSizes.length > 0 && currentSizeRecipe.length > 0">
+
+              <div v-if="currentSizeRecipe.length > 0">
                 <v-list rounded="lg" elevation="1">
                   <v-list-item
                     v-for="(item, index) in currentSizeRecipe"
@@ -898,7 +903,7 @@
                     <v-list-item-title class="font-weight-bold">
                       {{ item.ingredientName }}
                     </v-list-item-title>
-                    
+
                     <v-list-item-subtitle>
                       <v-chip size="small" color="success" variant="tonal" class="mt-1">
                         {{ item.quantityNeeded }} {{ item.unit }}
@@ -912,27 +917,31 @@
                         variant="text"
                         color="error"
                         @click="removeRecipeIngredient(index)"
-                  >
-                    <PhTrash :size="18" weight="bold" />
-                  </v-btn>
+                        :aria-label="`إزالة ${item.ingredientName} من الوصفة`"
+                        :title="`إزالة ${item.ingredientName} من الوصفة`"
+                      >
+                        <PhTrash :size="18" weight="bold" />
+                      </v-btn>
                     </template>
                   </v-list-item>
                 </v-list>
-          </div>
-              
-              <v-card v-else-if="itemSizes.length > 0" elevation="0" class="pa-8 text-center" style="background: var(--t-surface-high);">
+              </div>
+
+              <v-card v-else elevation="0" class="pa-8 text-center" style="background: var(--t-surface-high);">
                 <PhCookingPot :size="60" weight="thin" color="#CCCCCC" class="mb-3" />
-                <p class="text-body-1 text-grey">لا توجد مكونات في وصفة "{{ itemSizes.find(s => s.idItemSize === selectedRecipeSize)?.sizeName }}"</p>
-                <p class="text-caption text-grey-darken-1">أضف المكونات المطلوبة لتحضير هذا الحجم</p>
+                <p class="text-body-1 text-grey">لا توجد مكونات في "{{ selectedRecipeLabel }}"</p>
+                <p v-if="isBaseRecipeSelected" class="text-caption text-grey-darken-1">أضف المكونات المشتركة لكل الأحجام</p>
+                <p v-else-if="hasBaseRecipe" class="text-caption text-grey-darken-1">هذا الحجم يستخدم الوصفة الأساسية — أضف مكونات هنا فقط إذا كان يحتاج وصفة مختلفة</p>
+                <p v-else class="text-caption text-grey-darken-1">أضف المكونات المطلوبة لتحضير هذا الحجم، أو أضف وصفة أساسية لكل الأحجام</p>
               </v-card>
 
               <!-- Copy Recipe Helper -->
-              <v-alert v-if="itemSizes.length > 1" type="info" variant="tonal" class="mt-4">
+              <v-alert v-if="copyRecipeOptions.length > 0" type="info" variant="tonal" class="mt-4">
                 <div class="d-flex align-center justify-space-between">
-                  <span>💡 نسخ الوصفة من حجم آخر؟</span>
-                  <v-btn 
-                    size="small" 
-                    variant="outlined" 
+                  <span>💡 نسخ المكونات من وصفة أخرى؟</span>
+                  <v-btn
+                    size="small"
+                    variant="outlined"
                     @click="showCopyRecipeDialog = true"
                     color="info"
                   >
@@ -940,7 +949,6 @@
                   </v-btn>
                 </div>
               </v-alert>
-              </div>
             </v-window-item>
           </v-window>
         </v-card-text>
@@ -1066,7 +1074,7 @@
                     v-if="itemDialogTab === 'sizes'"
                     @click="itemDialogTab = 'recipe'" 
                     size="large"
-                    style="background: #3B82F6; color: white; border-radius: 10px; text-transform: none; font-weight: 600;"
+                    style="background: var(--t-primary); color: white; border-radius: 10px; text-transform: none; font-weight: 600;"
                     elevation="0"
                     class="px-8"
                   >
@@ -1084,7 +1092,7 @@
                     class="px-8"
                   >
                     <PhCheckCircle :size="20" weight="bold" class="ml-2" />
-                    حفظ وإنهاء
+                    حفظ الوصفات
                   </v-btn>
                 </div>
               </v-col>
@@ -1235,7 +1243,7 @@
           </v-card-title>
         </div>
         <v-card-text class="pa-5">
-          <p class="mb-3">اختر الحجم الذي تريد نسخ وصفته:</p>
+          <p class="mb-3">اختر الوصفة التي تريد نسخ مكوناتها (تستبدل مكونات {{ selectedRecipeLabel }}):</p>
           <v-select
             v-model="copyFromSize"
             :items="copyRecipeOptions"
@@ -1311,7 +1319,11 @@ const showAddDialog = ref(false)
 const showAddCategoryDialog = ref(false)
 const showCopyRecipeDialog = ref(false)
 const itemDialogTab = ref('info')
-const selectedRecipeSize = ref(null) // sizeId (no more 'base')
+// Recipe key: BASE_RECIPE_KEY = base recipe (sizeId NULL, used by every size that has no
+// recipe of its own), otherwise a sizeId.
+const BASE_RECIPE_KEY = 'base'
+const selectedRecipeSize = ref(BASE_RECIPE_KEY)
+const recipesDirty = ref(false) // unsaved recipe edits in the dialog
 
 // Editing states
 const editingItem = ref(null)
@@ -1389,9 +1401,25 @@ const currentSizeRecipe = computed(() => {
   return allRecipes.value[selectedRecipeSize.value] || []
 })
 
-// Copy recipe options
+const isBaseRecipeSelected = computed(() => selectedRecipeSize.value === BASE_RECIPE_KEY)
+const baseRecipeLabel = 'الوصفة الأساسية (لكل الأحجام)'
+const recipeLabel = (key) => key === BASE_RECIPE_KEY
+  ? baseRecipeLabel
+  : (itemSizes.value.find(s => String(s.idItemSize) === String(key))?.sizeName || 'حجم')
+const selectedRecipeLabel = computed(() => recipeLabel(selectedRecipeSize.value))
+const selectedSizePrice = computed(() => {
+  const size = itemSizes.value.find(s => s.idItemSize === selectedRecipeSize.value)
+  return Number(selectedMenuItem.value?.basePrice || 0) + Number(size?.priceAdjustment || 0)
+})
+const hasBaseRecipe = computed(() => (allRecipes.value[BASE_RECIPE_KEY] || []).length > 0)
+const sizeHasOwnRecipe = (sizeId) => (allRecipes.value[sizeId] || []).length > 0
+
+// Copy recipe options (base recipe + other sizes)
 const copyRecipeOptions = computed(() => {
   const options = []
+  if (selectedRecipeSize.value !== BASE_RECIPE_KEY) {
+    options.push({ value: BASE_RECIPE_KEY, title: baseRecipeLabel })
+  }
   itemSizes.value.forEach(size => {
     if (size.idItemSize !== selectedRecipeSize.value) {
       options.push({ value: size.idItemSize, title: size.sizeName })
@@ -1549,11 +1577,16 @@ const openAddItemDialog = () => {
   showAddDialog.value = true
 }
 
-const closeAddDialog = () => {
+const closeAddDialog = (force = false) => {
+  if (force !== true && recipesDirty.value &&
+      !window.confirm('لديك تغييرات على الوصفة لم تُحفظ بعد.\nهل تريد الإغلاق وتجاهل هذه التغييرات؟')) {
+    return
+  }
+  recipesDirty.value = false
   showAddDialog.value = false
   resetItemForm()
   itemDialogTab.value = 'info'
-  selectedRecipeSize.value = null
+  selectedRecipeSize.value = BASE_RECIPE_KEY
   allRecipes.value = {}
   itemSizes.value = []
 }
@@ -1630,10 +1663,9 @@ const editItem = async (item) => {
     await loadItemSizes(item.idMenuItem)
     await loadAllRecipes(item.idMenuItem)
     
-    // Set first size as default selection
-    if (itemSizes.value.length > 0) {
-      selectedRecipeSize.value = itemSizes.value[0].idItemSize
-    }
+    // Start on the first size that has its own recipe, otherwise on the base recipe
+    const firstWithRecipe = itemSizes.value.find(s => sizeHasOwnRecipe(s.idItemSize))
+    selectedRecipeSize.value = firstWithRecipe ? firstWithRecipe.idItemSize : BASE_RECIPE_KEY
   }
   
   showAddDialog.value = true
@@ -1785,6 +1817,15 @@ const toggleAvailability = async (item) => {
   }
 }
 
+// Delete failures: prefer an Arabic server message; a generic/English one (usually a
+// foreign key from past orders) gets the Arabic hint instead.
+const deleteErrorMessage = (error, fallback) => {
+  const msg = error?.response?.data?.message
+  if (msg && /[\u0600-\u06FF]/.test(msg)) return msg
+  if (error?.response) return 'لا يمكن الحذف لأن الصنف مستخدم في طلبات سابقة — يمكنك إيقافه بدلاً من ذلك'
+  return fallback
+}
+
 const deleteItem = async (item) => {
   if (!confirm(`هل تريد حذف "${item.itemName}"؟`)) return
 
@@ -1793,7 +1834,7 @@ const deleteItem = async (item) => {
     toast.success('تم حذف الصنف')
     await loadMenuItems()
   } catch (error) {
-    toast.error('فشل حذف الصنف')
+    toast.error(deleteErrorMessage(error, 'فشل حذف الصنف'))
     console.error(error)
   }
 }
@@ -1870,7 +1911,7 @@ const deleteCategory = async (category) => {
     toast.success('تم حذف التصنيف')
     await loadCategories()
   } catch (error) {
-    toast.error('فشل حذف التصنيف')
+    toast.error(deleteErrorMessage(error, 'فشل حذف التصنيف'))
     console.error(error)
   }
 }
@@ -1961,14 +2002,16 @@ const saveSize = async () => {
 }
 
 const deleteSize = async (size) => {
-  if (!confirm(`حذف الحجم "${size.sizeName}"؟`)) return
+  if (!confirm(`إيقاف الحجم "${size.sizeName}"؟ لن يظهر للبيع، ويبقى في الطلبات السابقة.`)) return
 
   try {
     await itemSizeAPI.delete(size.idItemSize)
-    toast.success('تم حذف الحجم')
+    // The backend deactivates the size (kept for past orders) rather than deleting it
+    toast.success('تم إيقاف الحجم')
     await loadItemSizes((selectedMenuItem.value.idMenuItem || selectedMenuItem.value.id))
+    if (selectedRecipeSize.value === size.idItemSize) selectedRecipeSize.value = BASE_RECIPE_KEY
   } catch (error) {
-    toast.error('فشل حذف الحجم')
+    toast.error(deleteErrorMessage(error, 'فشل إيقاف الحجم'))
     console.error(error)
   }
 }
@@ -1987,20 +2030,19 @@ const loadAllRecipes = async (menuItemId) => {
   try {
     const response = await recipeAPI.getByMenuItem(menuItemId)
     
-    // Group recipes by sizeId (no more 'base' - all must have sizeId)
+    // Group by sizeId; lines with sizeId NULL form the base recipe
     const grouped = {}
     response.data.forEach(r => {
-      if (!r.sizeId) return // Skip null sizeId (old base recipes)
-      
-      const sizeKey = r.sizeId
+      const sizeKey = r.sizeId ? r.sizeId : BASE_RECIPE_KEY
       if (!grouped[sizeKey]) {
         grouped[sizeKey] = []
       }
       
       // Convert inventory unit to recipe display unit
       const displayQuantity = convertToRecipeUnit(r.quantityNeeded, r.unit)
-      const displayUnit = r.unit.toLowerCase() === 'kg' || r.unit.toLowerCase() === 'kilogram' ? 'g' :
-                         r.unit.toLowerCase() === 'liter' || r.unit.toLowerCase() === 'l' ? 'ml' :
+      const unitLower = String(r.unit || '').toLowerCase()
+      const displayUnit = unitLower === 'kg' || unitLower === 'kilogram' ? 'g' :
+                         unitLower === 'liter' || unitLower === 'l' ? 'ml' :
                          r.unit
       
       grouped[sizeKey].push({
@@ -2013,9 +2055,11 @@ const loadAllRecipes = async (menuItemId) => {
     })
     
     allRecipes.value = grouped
+    recipesDirty.value = false
   } catch (error) {
     console.error('Failed to load recipes:', error)
     allRecipes.value = {}
+    toast.error('تعذّر تحميل الوصفة الحالية — لا تحفظ قبل إعادة فتح الصنف حتى لا تُستبدل')
   }
 }
 
@@ -2028,22 +2072,15 @@ const addRecipeIngredient = () => {
   const ingredient = ingredients.value.find(i => i.idIngredient === recipeForm.value.ingredientId)
   if (!ingredient) return
 
-  console.log('➕ Adding ingredient to recipe:')
-  console.log('  selectedRecipeSize (current size):', selectedRecipeSize.value)
-  console.log('  Size name:', itemSizes.value.find(s => s.idItemSize === selectedRecipeSize.value)?.sizeName)
-  console.log('  Ingredient:', ingredient.ingredientName)
-  console.log('  Quantity:', recipeForm.value.quantityNeeded)
-
   // Get current recipe for selected size
   const currentSizeKey = selectedRecipeSize.value
   if (!allRecipes.value[currentSizeKey]) {
     allRecipes.value[currentSizeKey] = []
-    console.log('  Created new recipe array for sizeId:', currentSizeKey)
   }
 
   // Check if already added
   if (allRecipes.value[currentSizeKey].find(r => r.ingredientId === ingredient.idIngredient)) {
-    toast.warning('المكون موجود بالفعل في هذا الحجم')
+    toast.warning(`المكون موجود بالفعل في ${selectedRecipeLabel.value}`)
     return
   }
 
@@ -2066,75 +2103,60 @@ const addRecipeIngredient = () => {
     quantityNeeded: 0
   }
 
-  toast.success('تمت الإضافة للوصفة')
+  recipesDirty.value = true
+  toast.info('أُضيف — اضغط "حفظ الوصفات" لحفظ التغييرات')
 }
 
 const removeRecipeIngredient = (index) => {
   const currentSizeKey = selectedRecipeSize.value
   if (allRecipes.value[currentSizeKey]) {
     allRecipes.value[currentSizeKey].splice(index, 1)
+    recipesDirty.value = true
   }
-  toast.info('تم الإزالة')
+  toast.info('أُزيل — اضغط "حفظ الوصفات" لحفظ التغييرات')
 }
 
 const saveAllRecipes = async () => {
-  // Check if at least one recipe exists
-  const totalRecipes = Object.values(allRecipes.value).flat().length
-  if (totalRecipes === 0) {
-    toast.warning('أضف مكونات لوصفة واحدة على الأقل')
+  const menuItemId = selectedMenuItem.value?.idMenuItem || selectedMenuItem.value?.id
+  if (!menuItemId) {
+    toast.error('خطأ: لم يتم تحديد الصنف')
     return
   }
 
-  // Check that all sizes have recipes
-  const sizesWithoutRecipes = itemSizes.value.filter(size => {
-    return !allRecipes.value[size.idItemSize] || allRecipes.value[size.idItemSize].length === 0
-  })
-
-  if (sizesWithoutRecipes.length > 0) {
-    const sizeNames = sizesWithoutRecipes.map(s => s.sizeName).join('، ')
-    const confirm = window.confirm(`تحذير: الأحجام التالية ليس لها وصفة: ${sizeNames}\n\nهل تريد المتابعة؟`)
-    if (!confirm) return
+  // The backend replaces the item's whole recipe set, so send base + every size together
+  const totalRecipes = Object.values(allRecipes.value).flat().length
+  if (totalRecipes === 0) {
+    if (!window.confirm('لا توجد أي مكونات في الوصفة.\nسيتم حذف وصفة هذا الصنف بالكامل ولن يُخصم أي مخزون عند بيعه. هل تريد المتابعة؟')) return
+  } else if (!hasBaseRecipe.value) {
+    // Sizes without their own lines fall back to the base recipe; warn only if there is none
+    const sizesWithoutRecipes = itemSizes.value.filter(size => !sizeHasOwnRecipe(size.idItemSize))
+    if (sizesWithoutRecipes.length > 0) {
+      const sizeNames = sizesWithoutRecipes.map(s => s.sizeName).join('، ')
+      if (!window.confirm(`تحذير: الأحجام التالية ليس لها وصفة ولا توجد وصفة أساسية: ${sizeNames}\nلن يُخصم مخزون عند بيعها.\n\nهل تريد المتابعة؟`)) return
+    }
   }
 
   saving.value = true
   try {
     const allRecipesData = []
-    
-    console.log('📝 Saving recipes. allRecipes:', allRecipes.value)
-    console.log('📝 Current selectedRecipeSize:', selectedRecipeSize.value)
-    console.log('📝 Available sizes:', itemSizes.value.map(s => ({ id: s.idItemSize, name: s.sizeName })))
-    
-    // Process all recipes (all sizes - no more 'base')
     Object.keys(allRecipes.value).forEach(sizeKey => {
-      const sizeRecipes = allRecipes.value[sizeKey]
-      const sizeName = itemSizes.value.find(s => s.idItemSize == sizeKey)?.sizeName
-      
-      console.log(`📝 Processing size ${sizeKey} (${sizeName}):`, sizeRecipes.length, 'ingredients')
-      
-      sizeRecipes.forEach(r => {
+      allRecipes.value[sizeKey].forEach(r => {
         const ingredient = ingredients.value.find(i => i.idIngredient === r.ingredientId)
         const originalUnit = r.originalUnit || ingredient?.unit || r.unit
-        const quantityInInventoryUnit = convertToInventoryUnit(r.quantityNeeded, originalUnit)
-        
-        const recipeData = {
+        allRecipesData.push({
           ingredientId: r.ingredientId,
-          quantityNeeded: quantityInInventoryUnit,
-          sizeId: Number(sizeKey) // ⭐ Always a sizeId (no more null!)
-        }
-        
-        console.log('  → Adding recipe:', ingredient?.ingredientName, 'sizeId:', recipeData.sizeId)
-        allRecipesData.push(recipeData)
+          quantityNeeded: convertToInventoryUnit(r.quantityNeeded, originalUnit),
+          sizeId: sizeKey === BASE_RECIPE_KEY ? null : Number(sizeKey)
+        })
       })
     })
 
-    console.log('📝 Total recipes to save:', allRecipesData.length)
-    console.log('📝 Full recipes data:', allRecipesData)
-
-    await recipeAPI.bulkUpdate((selectedMenuItem.value.idMenuItem || selectedMenuItem.value.id), allRecipesData)
-    toast.success('✅ تم حفظ جميع الوصفات بنجاح')
-    closeAddDialog()
+    await recipeAPI.bulkUpdate(menuItemId, allRecipesData)
+    toast.success('✅ تم حفظ جميع الوصفات')
+    recipesDirty.value = false
+    closeAddDialog(true)
   } catch (error) {
-    toast.error('فشل حفظ الوصفات')
+    toast.error(error?.response?.data?.message || 'فشل حفظ الوصفات — لم يتغير شيء')
     console.error(error)
   } finally {
     saving.value = false
@@ -2149,13 +2171,14 @@ const copyRecipe = () => {
   
   const sourceRecipe = allRecipes.value[copyFromSize.value]
   if (!sourceRecipe || sourceRecipe.length === 0) {
-    toast.error('الحجم المختار ليس لديه وصفة')
+    toast.error('المصدر المختار ليس فيه مكونات')
     return
   }
   
   // Copy recipe to current size
   allRecipes.value[selectedRecipeSize.value] = JSON.parse(JSON.stringify(sourceRecipe))
-  toast.success('تم نسخ الوصفة بنجاح')
+  recipesDirty.value = true
+  toast.info('نُسخت الوصفة — اضغط "حفظ الوصفات" لحفظ التغييرات')
   showCopyRecipeDialog.value = false
   copyFromSize.value = null
 }

@@ -14,6 +14,8 @@
                 color="white"
                 @click="$router.push('/customers')"
                 class="ml-4"
+                aria-label="العودة إلى العملاء"
+                title="العودة إلى العملاء"
               >
                 <PhArrowRight :size="24" weight="bold" />
               </v-btn>
@@ -39,28 +41,47 @@
       </v-row>
 
       <v-row class="mb-6">
-        <v-col cols="12" sm="6" md="3">
-          <v-card elevation="0" style="background: var(--t-surface); border: 1px solid var(--t-border); border-radius: 12px;" class="pa-5">
+        <v-col cols="12" sm="6" md="4">
+          <v-card elevation="0" style="background: var(--t-surface); border: 1px solid var(--t-border); border-radius: 12px;" class="pa-5 h-100">
+            <p class="text-body-2 mb-2" style="color: var(--t-text-dim);">الدين الافتتاحي</p>
+            <h2 class="text-h5 font-weight-bold" style="color: var(--t-text);">
+              {{ fmt(profile?.initialDebt) }} د.ع
+            </h2>
+          </v-card>
+        </v-col>
+        <v-col cols="12" sm="6" md="4">
+          <v-card elevation="0" style="background: var(--t-surface); border: 1px solid var(--t-border); border-radius: 12px;" class="pa-5 h-100">
             <p class="text-body-2 mb-2" style="color: var(--t-text-dim);">إجمالي المبيعات آجل</p>
             <h2 class="text-h5 font-weight-bold" style="color: var(--t-text);">
-              {{ Number(profile?.totalOrders || 0).toLocaleString() }} د.ع
+              {{ fmt(profile?.totalOrders) }} د.ع
             </h2>
           </v-card>
         </v-col>
-        <v-col cols="12" sm="6" md="3">
-          <v-card elevation="0" style="background: var(--t-surface); border: 1px solid var(--t-border); border-radius: 12px;" class="pa-5">
+        <v-col cols="12" sm="6" md="4">
+          <v-card elevation="0" style="background: var(--t-surface); border: 1px solid var(--t-border); border-radius: 12px;" class="pa-5 h-100">
+            <p class="text-body-2 mb-2" style="color: var(--t-text-dim);">المرتجعات المسترجعة للحساب</p>
+            <h2 class="text-h5 font-weight-bold" style="color: #D97706;">
+              {{ fmt(profile?.totalRefunded) }} د.ع
+            </h2>
+          </v-card>
+        </v-col>
+        <v-col cols="12" sm="6" md="6">
+          <v-card elevation="0" style="background: var(--t-surface); border: 1px solid var(--t-border); border-radius: 12px;" class="pa-5 h-100">
             <p class="text-body-2 mb-2" style="color: var(--t-text-dim);">المسدد</p>
             <h2 class="text-h5 font-weight-bold" style="color: #10B981;">
-              {{ Number(profile?.totalPaid || 0).toLocaleString() }} د.ع
+              {{ fmt(profile?.totalPaid) }} د.ع
             </h2>
           </v-card>
         </v-col>
-        <v-col cols="12" sm="6" md="3">
-          <v-card elevation="0" style="background: var(--t-surface); border: 1px solid var(--t-border); border-radius: 12px;" class="pa-5">
-            <p class="text-body-2 mb-2" style="color: var(--t-text-dim);">المتبقي (ما يستحق علينا)</p>
-            <h2 class="text-h5 font-weight-bold" :style="{ color: (profile?.balance || 0) > 0 ? '#EF4444' : 'var(--t-text)' }">
-              {{ Number(profile?.balance || 0).toLocaleString() }} د.ع
+        <v-col cols="12" md="6">
+          <v-card elevation="0" style="background: var(--t-surface); border: 1px solid var(--t-border); border-radius: 12px;" class="pa-5 h-100">
+            <p class="text-body-2 mb-2" style="color: var(--t-text-dim);">المتبقي على العميل</p>
+            <h2 class="text-h5 font-weight-bold" :style="{ color: Number(profile?.balance || 0) > 0 ? '#EF4444' : 'var(--t-text)' }">
+              {{ fmt(profile?.balance) }} د.ع
             </h2>
+            <p class="text-caption mt-1 mb-0" style="color: var(--t-text-dim);">
+              = الدين الافتتاحي + المبيعات آجل − المسدد − المرتجعات
+            </p>
           </v-card>
         </v-col>
       </v-row>
@@ -176,10 +197,11 @@ import { useRoute } from 'vue-router'
 import { useToast } from 'vue-toastification'
 import AppLayout from '@/components/AppLayout.vue'
 import { customerAPI } from '@/services/api'
-import { formatDate } from '@/utils/dateFormatter'
+import { formatDate, todayBusinessDate } from '@/utils/dateFormatter'
 import { PhArrowRight } from '@phosphor-icons/vue'
 
 const toast = useToast()
+const fmt = (v) => Number(v || 0).toLocaleString()
 const route = useRoute()
 
 const profile = ref(null)
@@ -189,7 +211,7 @@ const showReceiptDialog = ref(false)
 const receiptSaving = ref(false)
 const receiptForm = ref({
   amount: null,
-  receiptDate: new Date().toISOString().slice(0, 10),
+  receiptDate: todayBusinessDate(),
   paymentMethod: 'cash',
   notes: ''
 })
@@ -232,7 +254,7 @@ async function loadProfile() {
 function resetReceiptForm() {
   receiptForm.value = {
     amount: null,
-    receiptDate: new Date().toISOString().slice(0, 10),
+    receiptDate: todayBusinessDate(),
     paymentMethod: 'cash',
     notes: ''
   }

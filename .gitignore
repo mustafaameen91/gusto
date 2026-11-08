@@ -5,6 +5,7 @@ package-lock.json
 # Secrets
 .env
 .env.*
+!.env.example
 
 # Uploaded files (keep the folder)
 gusto-backend/uploads/*
@@ -20,3 +21,6 @@ gusto-backend/gusto-frontend/
 .idea/
 *.log
 gusto-backend/tests/.server.log
+
+# Login sheet (passwords) - never commit
+Gusto-Logins.pdf

@@ -18,39 +18,60 @@ Recipe.create = (newRecipe, result) => {
   });
 };
 
+// Replaces the item's whole recipe set (base lines with sizeId NULL + per-size lines).
+// The caller must send the complete set. Delete + insert run in one transaction so a
+// failed insert can't leave the item with no recipe.
 Recipe.bulkCreate = (menuItemId, recipes, result) => {
-  // First delete existing recipes
-  db.query("DELETE FROM Recipes WHERE menuItemId = ?", [menuItemId], (err) => {
-    if (err) {
-      result(err, null);
+  const toSizeId = (v) => {
+    const n = Number(v);
+    return v === null || v === undefined || v === "" || !Number.isFinite(n) || n <= 0 ? null : n;
+  };
+
+  db.getConnection((errConn, conn) => {
+    if (errConn) {
+      result(errConn, null);
       return;
     }
+    const fail = (err) => conn.rollback(() => { conn.release(); result(err, null); });
 
-    if (recipes.length === 0) {
-      result(null, []);
-      return;
-    }
-
-    // Insert new recipes (with sizeId support!)
-    const recipesData = recipes.map(r => [
-      menuItemId,
-      r.sizeId || null,  // ⭐ Added sizeId!
-      r.ingredientId,
-      r.quantityNeeded,
-      r.notes || null
-    ]);
-
-    db.query(
-      "INSERT INTO Recipes (menuItemId, sizeId, ingredientId, quantityNeeded, notes) VALUES ?",
-      [recipesData],
-      (err, res) => {
-        if (err) {
-          result(err, null);
-          return;
-        }
-        result(null, res);
+    conn.beginTransaction((errTx) => {
+      if (errTx) {
+        conn.release();
+        result(errTx, null);
+        return;
       }
-    );
+
+      conn.query("DELETE FROM Recipes WHERE menuItemId = ?", [menuItemId], (errDel) => {
+        if (errDel) return fail(errDel);
+
+        const finish = (data) => {
+          conn.commit((errCommit) => {
+            if (errCommit) return fail(errCommit);
+            conn.release();
+            result(null, data);
+          });
+        };
+
+        if (recipes.length === 0) return finish({ affectedRows: 0 });
+
+        const recipesData = recipes.map(r => [
+          menuItemId,
+          toSizeId(r.sizeId),
+          r.ingredientId,
+          r.quantityNeeded,
+          r.notes || null
+        ]);
+
+        conn.query(
+          "INSERT INTO Recipes (menuItemId, sizeId, ingredientId, quantityNeeded, notes) VALUES ?",
+          [recipesData],
+          (errIns, res) => {
+            if (errIns) return fail(errIns);
+            finish(res);
+          }
+        );
+      });
+    });
   });
 };
 

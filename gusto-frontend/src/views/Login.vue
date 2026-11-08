@@ -104,6 +104,7 @@
 import { ref } from "vue";
 import { useRouter } from "vue-router";
 import { useAuthStore } from "@/stores/auth";
+import { homeFor } from "@/config/navigation";
 import logoImg from "@/assets/logo.png";
 import headerBg from "@/assets/header-bg.jpeg";
 import { useToast } from "vue-toastification";
@@ -138,7 +139,7 @@ const handleLogin = async () => {
 
   if (result.success) {
     toast.success("تم تسجيل الدخول بنجاح!");
-    router.push("/dashboard");
+    router.push(homeFor(authStore.user?.role));
   } else {
     toast.error(result.message);
   }

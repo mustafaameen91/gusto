@@ -42,6 +42,8 @@
               variant="outlined"
               size="large"
               style="border-color: #E5E7EB; color: var(--t-text);"
+              aria-label="خيارات التصدير"
+              title="خيارات التصدير"
             >
               <PhDotsThreeVertical :size="20" weight="bold" class="ml-1" />
               <PhDownload :size="20" weight="bold" class="mr-1" />
@@ -253,6 +255,38 @@
               </h2>
             </v-card>
           </v-col>
+          <v-col cols="12" sm="6" md="3">
+            <v-card elevation="0" style="background: var(--t-surface); border: 1px solid var(--t-border); border-radius: 12px;" class="pa-4">
+              <p class="text-body-2 mb-2" style="color: var(--t-text-dim); font-weight: 500;">إجمالي آجل</p>
+              <h2 class="text-h5 font-weight-bold" style="color: var(--t-text);">
+                {{ Number(financialReport.income?.totalCredit || 0).toLocaleString() }} د.ع
+              </h2>
+            </v-card>
+          </v-col>
+        </v-row>
+
+        <!-- Profit breakdown -->
+        <v-row class="mb-6">
+          <v-col cols="12">
+            <v-card elevation="0" style="background: var(--t-surface); border: 1px solid var(--t-border); border-radius: 12px;">
+              <v-card-title class="pa-4" style="border-bottom: 1px solid var(--t-border-subtle); color: #046375; font-weight: 600;">
+                تفصيل الربح
+              </v-card-title>
+              <v-card-text class="pa-4">
+                <div
+                  v-for="row in profitBreakdownRows"
+                  :key="row.label"
+                  class="d-flex justify-space-between align-center py-2"
+                  :style="{ borderTop: row.total ? '1px solid var(--t-border)' : 'none', fontWeight: row.total ? 700 : 500 }"
+                >
+                  <span :style="{ color: row.total ? 'var(--t-text)' : 'var(--t-text-dim)' }">{{ row.sign }} {{ row.label }}</span>
+                  <span :style="{ color: row.color || 'var(--t-text)' }">
+                    {{ row.isPercent ? `${row.value}%` : `${Number(row.value || 0).toLocaleString()} د.ع` }}
+                  </span>
+                </div>
+              </v-card-text>
+            </v-card>
+          </v-col>
         </v-row>
 
         <!-- Orders list with payment method -->
@@ -260,7 +294,7 @@
           <v-col cols="12">
             <v-card elevation="0" style="background: var(--t-surface); border: 1px solid var(--t-border); border-radius: 12px;">
               <v-card-title class="pa-4" style="border-bottom: 1px solid var(--t-border-subtle); color: #046375; font-weight: 600;">
-                الطلبات (كاش / بطاقة)
+                الطلبات (كاش / بطاقة / آجل)
               </v-card-title>
               <v-data-table
                 :headers="financialOrderHeaders"
@@ -277,8 +311,8 @@
                   <span style="font-weight: 600;">{{ Number(item.totalAmount || 0).toLocaleString() }} د.ع</span>
                 </template>
                 <template v-slot:item.orderType="{ item }">
-                  <v-chip :color="item.orderType === 'card' ? 'primary' : 'success'" size="small" variant="flat">
-                    {{ item.orderType === 'card' ? 'بطاقة' : 'كاش' }}
+                  <v-chip :color="item.orderType === 'card' ? 'primary' : item.orderType === 'credit' ? 'warning' : 'success'" size="small" variant="flat">
+                    {{ item.orderType === 'card' ? 'بطاقة' : item.orderType === 'credit' ? 'آجل' : 'كاش' }}
                   </v-chip>
                 </template>
               </v-data-table>
@@ -547,6 +581,14 @@
               <p class="text-body-2 mb-2" style="color: var(--t-text-dim); font-weight: 500;">إجمالي بطاقة</p>
               <h2 class="text-h5 font-weight-bold" style="color: var(--t-text);">
                 {{ Number(salesReport.totalCard || 0).toLocaleString() }} د.ع
+              </h2>
+            </v-card>
+          </v-col>
+          <v-col cols="12" sm="6" md="3">
+            <v-card elevation="0" style="background: var(--t-surface); border: 1px solid var(--t-border); border-radius: 12px;" class="pa-4">
+              <p class="text-body-2 mb-2" style="color: var(--t-text-dim); font-weight: 500;">إجمالي آجل</p>
+              <h2 class="text-h5 font-weight-bold" style="color: var(--t-text);">
+                {{ Number(salesReport.totalCredit || 0).toLocaleString() }} د.ع
               </h2>
             </v-card>
           </v-col>
@@ -1549,7 +1591,7 @@ import { useToast } from 'vue-toastification'
 import AppLayout from '@/components/AppLayout.vue'
 import { PhArrowsClockwise, PhCoins, PhReceipt, PhForkKnife, PhChartBarHorizontal, PhChartPieSlice, PhDotsThreeVertical, PhDownload, PhFilePdf, PhPrinter, PhChartLineUp, PhTrendUp, PhTrendDown, PhShoppingCart, PhPackage, PhArrowDown, PhTrash } from '@phosphor-icons/vue'
 import { useAuthStore } from '@/stores/auth'
-import { formatCurrentDateArabic, formatDate, formatDateTime } from '@/utils/dateFormatter'
+import { formatCurrentDateArabic, formatDate, formatDateTime, todayBusinessDate, addDaysYMD } from '@/utils/dateFormatter'
 import logoImg from '@/assets/logo.png'
 import * as XLSX from 'xlsx'
 import jsPDF from 'jspdf'
@@ -1566,7 +1608,7 @@ const currentDate = computed(() => {
   return formatCurrentDateArabic()
 })
 
-const today = new Date().toISOString().split('T')[0]
+const today = todayBusinessDate()
 const startDate = ref(today)
 const endDate = ref(today)
 const quickRange = ref('today')
@@ -1587,7 +1629,8 @@ const salesPaymentMethodFilter = ref('all')
 const paymentMethodOptions = [
   { label: 'الكل', value: 'all' },
   { label: 'كاش', value: 'cash' },
-  { label: 'بطاقة', value: 'card' }
+  { label: 'بطاقة', value: 'card' },
+  { label: 'آجل', value: 'credit' }
 ]
 
 const loading = ref({
@@ -1611,13 +1654,28 @@ const reports = ref({
 })
 
 const financialReport = ref({
-  income: { totalSales: 0, orderCount: 0, totalCash: 0, totalCard: 0 },
+  income: { totalSales: 0, orderCount: 0, totalCash: 0, totalCard: 0, totalCredit: 0 },
   expenses: { totalExpenses: 0, expenseCount: 0 },
   purchases: { totalPurchases: 0 },
-  profit: { grossProfit: 0, netProfit: 0, profitMargin: 0 },
+  profit: { netSales: 0, refunds: 0, cogs: 0, grossProfit: 0, operatingExpenses: 0, otherIncome: 0, netProfit: 0, profitMargin: 0 },
   expenseDetails: [],
   itemSalesDetails: [],
   orderDetails: []
+})
+
+// صافي المبيعات − تكلفة المبيعات = إجمالي الربح؛ − المصروفات التشغيلية + الإيرادات الأخرى = صافي الربح
+const profitBreakdownRows = computed(() => {
+  const p = financialReport.value.profit || {}
+  const net = Number(p.netProfit || 0)
+  return [
+    { label: 'صافي المبيعات', sign: '', value: p.netSales },
+    { label: 'تكلفة المبيعات', sign: '−', value: p.cogs },
+    { label: 'إجمالي الربح', sign: '=', value: p.grossProfit, total: true },
+    { label: 'المصروفات التشغيلية', sign: '−', value: p.operatingExpenses },
+    { label: 'الإيرادات الأخرى', sign: '+', value: p.otherIncome },
+    { label: 'صافي الربح', sign: '=', value: net, total: true, color: net >= 0 ? '#10B981' : '#EF4444' },
+    { label: 'هامش الربح', sign: '', value: Number(p.profitMargin || 0), isPercent: true }
+  ]
 })
 
 const salesReport = ref({
@@ -1625,7 +1683,8 @@ const salesReport = ref({
   categorySales: [],
   topItems: [],
   totalCash: 0,
-  totalCard: 0
+  totalCard: 0,
+  totalCredit: 0
 })
 
 const expensesReport = ref({
@@ -1636,8 +1695,8 @@ const expensesReport = ref({
 })
 
 const timeSalesFilter = ref({
-  startDate: new Date().toISOString().split('T')[0],
-  endDate: new Date().toISOString().split('T')[0],
+  startDate: todayBusinessDate(),
+  endDate: todayBusinessDate(),
   startTime: '00:00',
   endTime: '23:59'
 })
@@ -1789,28 +1848,32 @@ const itemSalesHeaders = [
   { title: 'عدد الطلبات', key: 'orderCount', align: 'center' }
 ]
 
+// Shift a YYYY-MM-DD by whole months/years in local time (no UTC conversion)
+const shiftYMD = (ymd, months) => {
+  const [y, m, d] = ymd.split('-').map(Number)
+  const target = new Date(y, m - 1 + months, 1)
+  const lastDay = new Date(target.getFullYear(), target.getMonth() + 1, 0).getDate()
+  const day = Math.min(d, lastDay)
+  return `${target.getFullYear()}-${String(target.getMonth() + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`
+}
+
 watch(quickRange, (newRange) => {
-  const today = new Date()
-  endDate.value = today.toISOString().split('T')[0]
-  
+  const today = todayBusinessDate()
+  endDate.value = today
+
   switch(newRange) {
     case 'today':
-      startDate.value = endDate.value
+      startDate.value = today
       break
     case 'week':
-      const weekAgo = new Date(today)
-      weekAgo.setDate(today.getDate() - 7)
-      startDate.value = weekAgo.toISOString().split('T')[0]
+      // Last 7 days including today
+      startDate.value = addDaysYMD(today, -6)
       break
     case 'month':
-      const monthAgo = new Date(today)
-      monthAgo.setMonth(today.getMonth() - 1)
-      startDate.value = monthAgo.toISOString().split('T')[0]
+      startDate.value = addDaysYMD(shiftYMD(today, -1), 1)
       break
     case 'year':
-      const yearAgo = new Date(today)
-      yearAgo.setFullYear(today.getFullYear() - 1)
-      startDate.value = yearAgo.toISOString().split('T')[0]
+      startDate.value = addDaysYMD(shiftYMD(today, -12), 1)
       break
   }
   
@@ -1876,6 +1939,7 @@ const loadFinancialReport = async (params) => {
     financialReport.value = response.data || {}
   } catch (error) {
     console.error('Failed to load financial report:', error)
+    toast.error(error.response?.data?.message || 'فشل تحميل التقرير المالي')
   } finally {
     loading.value.financial = false
   }
@@ -1884,9 +1948,10 @@ const loadFinancialReport = async (params) => {
 const loadSalesReport = async (params = null) => {
   loading.value.sales = true
   try {
-    const queryParams = params || {
+    const queryParams = {
       startDate: startDate.value,
       endDate: endDate.value,
+      ...(params || {}),
       paymentMethod: salesPaymentMethodFilter.value
     }
 
@@ -1904,12 +1969,13 @@ const loadSalesReport = async (params = null) => {
       categorySales: [],
       topItems: [],
       totalCash: 0,
-      totalCard: 0
+      totalCard: 0,
+      totalCredit: 0
     }
     reports.value.topItems = salesReport.value.topItems || []
   } catch (error) {
     console.error('Failed to load sales report:', error)
-    toast.error('فشل تحميل تقرير المبيعات')
+    toast.error(error.response?.data?.message || 'فشل تحميل تقرير المبيعات')
   } finally {
     loading.value.sales = false
   }
@@ -2122,6 +2188,7 @@ const loadExpensesReport = async (params) => {
     expensesReport.value = response.data || {}
   } catch (error) {
     console.error('Failed to load expenses report:', error)
+    toast.error(error.response?.data?.message || 'فشل تحميل تقرير المصروفات')
   } finally {
     loading.value.expenses = false
   }
@@ -2134,6 +2201,7 @@ const loadPurchasesReport = async (params) => {
     purchasesReport.value = response.data || {}
   } catch (error) {
     console.error('Failed to load purchases report:', error)
+    toast.error(error.response?.data?.message || 'فشل تحميل تقرير المشتريات')
   } finally {
     loading.value.purchases = false
   }
@@ -2146,6 +2214,7 @@ const loadDailySummary = async (params) => {
     dailySummary.value = response.data || {}
   } catch (error) {
     console.error('Failed to load daily summary:', error)
+    toast.error(error.response?.data?.message || 'فشل تحميل الملخص اليومي')
   } finally {
     loading.value.summary = false
   }
@@ -2807,6 +2876,9 @@ const exportToExcel = () => {
           ['الإيرادات', '', ''],
           ['إجمالي المبيعات', financialReport.value.income?.totalSales || 0, 'د.ع'],
           ['عدد الطلبات', financialReport.value.income?.orderCount || 0, ''],
+          ['كاش', financialReport.value.income?.totalCash || 0, 'د.ع'],
+          ['بطاقة', financialReport.value.income?.totalCard || 0, 'د.ع'],
+          ['آجل', financialReport.value.income?.totalCredit || 0, 'د.ع'],
           ['', '', ''],
           ['المصروفات', '', ''],
           ['إجمالي المصروفات', financialReport.value.expenses?.totalExpenses || 0, 'د.ع'],
@@ -2815,9 +2887,13 @@ const exportToExcel = () => {
           ['المشتريات', '', ''],
           ['إجمالي المشتريات', financialReport.value.purchases?.totalPurchases || 0, 'د.ع'],
           ['', '', ''],
-          ['الربح', '', ''],
-          ['إجمالي الربح', financialReport.value.profit?.grossProfit || 0, 'د.ع'],
-          ['صافي الربح', financialReport.value.profit?.netProfit || 0, 'د.ع'],
+          ['تفصيل الربح', '', ''],
+          ['صافي المبيعات', financialReport.value.profit?.netSales || 0, 'د.ع'],
+          ['− تكلفة المبيعات', financialReport.value.profit?.cogs || 0, 'د.ع'],
+          ['= إجمالي الربح', financialReport.value.profit?.grossProfit || 0, 'د.ع'],
+          ['− المصروفات التشغيلية', financialReport.value.profit?.operatingExpenses || 0, 'د.ع'],
+          ['+ الإيرادات الأخرى', financialReport.value.profit?.otherIncome || 0, 'د.ع'],
+          ['= صافي الربح', financialReport.value.profit?.netProfit || 0, 'د.ع'],
           ['هامش الربح', `${financialReport.value.profit?.profitMargin || 0}%`, '']
         ]
         break
@@ -2827,6 +2903,10 @@ const exportToExcel = () => {
           ['تقرير المبيعات', '', ''],
           ['من', startDate.value, ''],
           ['إلى', endDate.value, ''],
+          ['', '', ''],
+          ['كاش', salesReport.value.totalCash || 0, 'د.ع'],
+          ['بطاقة', salesReport.value.totalCard || 0, 'د.ع'],
+          ['آجل', salesReport.value.totalCredit || 0, 'د.ع'],
           ['', '', ''],
           ['المبيعات اليومية', '', ''],
           ['التاريخ', 'عدد الطلبات', 'إجمالي المبيعات (د.ع)'],
@@ -3119,6 +3199,20 @@ const exportToPDF = async () => {
                 <p style="margin: 3px 0 0 0; color: #1f2937; font-size: 14px; font-weight: bold;">${financialReport.value.income?.orderCount || 0}</p>
               </div>
             </div>
+            <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; margin-bottom: 8px;">
+              <div style="background: #f3f4f6; padding: 10px; border-radius: 6px;">
+                <p style="margin: 0; color: #6B7280; font-size: 10px;">كاش</p>
+                <p style="margin: 3px 0 0 0; color: #1f2937; font-size: 14px; font-weight: bold;">${Number(financialReport.value.income?.totalCash || 0).toLocaleString()} د.ع</p>
+              </div>
+              <div style="background: #f3f4f6; padding: 10px; border-radius: 6px;">
+                <p style="margin: 0; color: #6B7280; font-size: 10px;">بطاقة</p>
+                <p style="margin: 3px 0 0 0; color: #1f2937; font-size: 14px; font-weight: bold;">${Number(financialReport.value.income?.totalCard || 0).toLocaleString()} د.ع</p>
+              </div>
+              <div style="background: #f3f4f6; padding: 10px; border-radius: 6px;">
+                <p style="margin: 0; color: #6B7280; font-size: 10px;">آجل</p>
+                <p style="margin: 3px 0 0 0; color: #1f2937; font-size: 14px; font-weight: bold;">${Number(financialReport.value.income?.totalCredit || 0).toLocaleString()} د.ع</p>
+              </div>
+            </div>
           </div>
           <div style="margin-bottom: 20px;">
             <h6 style="color: #046375; font-size: 8px; margin-bottom: 4px; border-bottom: 1px solid #E5E7EB; padding-bottom: 2px; font-weight: bold;">المصروفات</h6>
@@ -3141,21 +3235,17 @@ const exportToPDF = async () => {
             </div>
           </div>
           <div style="margin-bottom: 20px;">
-            <h6 style="color: #046375; font-size: 8px; margin-bottom: 4px; border-bottom: 1px solid #E5E7EB; padding-bottom: 2px; font-weight: bold;">الربح</h6>
-            <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px;">
-              <div style="background: #ECFDF5; padding: 10px; border-radius: 6px;">
-                <p style="margin: 0; color: #6B7280; font-size: 10px;">إجمالي الربح</p>
-                <p style="margin: 3px 0 0 0; color: #10B981; font-size: 14px; font-weight: bold;">${Number(financialReport.value.profit?.grossProfit || 0).toLocaleString()} د.ع</p>
-              </div>
-              <div style="background: #ECFDF5; padding: 10px; border-radius: 6px;">
-                <p style="margin: 0; color: #6B7280; font-size: 10px;">صافي الربح</p>
-                <p style="margin: 3px 0 0 0; color: #10B981; font-size: 14px; font-weight: bold;">${Number(financialReport.value.profit?.netProfit || 0).toLocaleString()} د.ع</p>
-              </div>
-              <div style="background: #ECFDF5; padding: 10px; border-radius: 6px;">
-                <p style="margin: 0; color: #6B7280; font-size: 10px;">هامش الربح</p>
-                <p style="margin: 3px 0 0 0; color: #10B981; font-size: 14px; font-weight: bold;">${financialReport.value.profit?.profitMargin || 0}%</p>
-              </div>
-            </div>
+            <h6 style="color: #046375; font-size: 8px; margin-bottom: 4px; border-bottom: 1px solid #E5E7EB; padding-bottom: 2px; font-weight: bold;">تفصيل الربح</h6>
+            <table style="width: 100%; border-collapse: collapse; font-size: 10px; background: #ECFDF5; border-radius: 6px;">
+              <tbody>
+                ${profitBreakdownRows.value.map(r => `
+                  <tr style="${r.total ? 'border-top: 1px solid #A7F3D0; font-weight: bold;' : ''}">
+                    <td style="padding: 6px 10px; color: ${r.total ? '#1f2937' : '#6B7280'};">${r.sign} ${r.label}</td>
+                    <td style="padding: 6px 10px; text-align: left; color: ${r.color || '#1f2937'};">${r.isPercent ? `${r.value}%` : `${Number(r.value || 0).toLocaleString()} د.ع`}</td>
+                  </tr>
+                `).join('')}
+              </tbody>
+            </table>
           </div>
           <div style="margin-bottom: 20px;">
             <h6 style="color: #046375; font-size: 8px; margin-bottom: 4px; border-bottom: 1px solid #E5E7EB; padding-bottom: 2px; font-weight: bold;">تفاصيل المصروفات</h6>

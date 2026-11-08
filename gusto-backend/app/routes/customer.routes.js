@@ -5,7 +5,8 @@ module.exports = (app) => {
 
   const staff = [authMiddleware.verifyToken, requireRole(["admin", "cashier", "supervisor"])];
   const managers = [authMiddleware.verifyToken, requireRole(["admin", "supervisor"])];
-  app.get("/api/customers", ...staff, customers.getAll);
+  // The POS loads the customer list for credit sales, including for waiters
+  app.get("/api/customers", authMiddleware.verifyToken, requireRole(["admin", "cashier", "supervisor", "waiter"]), customers.getAll);
   app.get("/api/customers/:id", ...staff, customers.findById);
   app.get("/api/customers/:id/profile", ...staff, customers.getProfile);
   app.post("/api/customers", ...staff, customers.create);

@@ -11,7 +11,8 @@
     "build": "electron-builder",
     "build:mac": "electron-builder --mac",
     "build:win": "electron-builder --win",
-    "build:linux": "electron-builder --linux"
+    "build:linux": "electron-builder --linux",
+    "test:print": "electron tests/print-test.js"
   },
   "dependencies": {
     "electron-updater": "^6.1.7"
@@ -30,8 +31,11 @@
       "main.js",
       "preload.js",
       "preload-customer.js",
+      "preload-settings.js",
+      "printer-settings.html",
       "customer-display.html",
       "error.html",
+      "printing/**/*",
       "assets/**/*"
     ],
     "mac": {

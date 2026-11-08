@@ -400,6 +400,9 @@ exports.findAll = (req, res) => {
   const filters = {
     status: req.query.status,
     date: req.query.date,
+    startDate: req.query.startDate,
+    endDate: req.query.endDate,
+    dailyReceiptId: req.query.dailyReceiptId,
     page: req.query.page,
     limit: req.query.limit
   };

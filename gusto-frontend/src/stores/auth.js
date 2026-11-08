@@ -30,7 +30,7 @@ export const useAuthStore = defineStore('auth', {
       } catch (error) {
         return { 
           success: false, 
-          message: error.response?.data?.message || 'Login failed'
+          message: error.response?.data?.message || 'تعذّر تسجيل الدخول، تحقق من الاتصال'
         }
       }
     },

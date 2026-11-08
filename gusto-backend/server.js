@@ -98,12 +98,22 @@ require("./app/routes/journalEntry.routes")(app);
 require("./app/routes/payment.routes")(app);
 require("./app/routes/otherIncome.routes")(app);
 
-// Serve frontend static files from dist folder — cached for 1 day
-// The built web app: gusto-frontend/dist next to the backend (or a copy inside the backend folder)
+// The built web app. Deploy: `cd gusto-frontend && npm run build:backend` writes it to
+// gusto-backend/public, so uploading the backend folder alone deploys the whole system.
 const fs = require("fs");
-const frontendDistPath = [path.join(__dirname, "../gusto-frontend/dist"), path.join(__dirname, "gusto-frontend/dist")]
-  .find((p) => fs.existsSync(path.join(p, "index.html"))) || path.join(__dirname, "../gusto-frontend/dist");
-app.use(express.static(frontendDistPath));
+const frontendDistPath =
+  [path.join(__dirname, "public"), path.join(__dirname, "../gusto-frontend/dist")].find((p) => fs.existsSync(path.join(p, "index.html"))) ||
+  path.join(__dirname, "public");
+console.log(`🖥️  Web app served from: ${frontendDistPath}`);
+app.use(
+  express.static(frontendDistPath, {
+    // Hashed assets never change; index.html and the service worker must always be fresh
+    setHeaders: (res, filePath) => {
+      if (/[\\/]assets[\\/]/.test(filePath)) res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+      else res.setHeader("Cache-Control", "no-cache");
+    },
+  }),
+);
 
 // Catch-all handler: send back React/Vue app's index.html file for SPA routing
 // This must be after API routes but before 404 handler

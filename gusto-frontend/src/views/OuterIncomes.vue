@@ -141,6 +141,7 @@ import { ref, onMounted } from 'vue'
 import { useToast } from 'vue-toastification'
 import AppLayout from '@/components/AppLayout.vue'
 import { otherIncomesAPI, dailyReceiptAPI, accountAPI } from '@/services/api'
+import { todayBusinessDate, firstOfMonthYMD } from '@/utils/dateFormatter'
 
 const toast = useToast()
 const loading = ref(false)
@@ -148,16 +149,15 @@ const saving = ref(false)
 const items = ref([])
 const incomeAccounts = ref([])
 const showAddDialog = ref(false)
-const today = new Date()
-const firstOfMonth = new Date(today.getFullYear(), today.getMonth(), 1)
+const today = todayBusinessDate()
 const filters = ref({
-  startDate: firstOfMonth.toISOString().slice(0, 10),
-  endDate: today.toISOString().slice(0, 10),
+  startDate: firstOfMonthYMD(today),
+  endDate: today,
   limit: 200
 })
 const form = ref({
   amount: null,
-  incomeDate: today.toISOString().slice(0, 10),
+  incomeDate: today,
   incomeAccountId: null,
   paymentMethod: 'cash',
   notes: '',
@@ -199,7 +199,7 @@ async function load() {
 function resetForm() {
   form.value = {
     amount: null,
-    incomeDate: new Date().toISOString().slice(0, 10),
+    incomeDate: todayBusinessDate(),
     incomeAccountId: null,
     paymentMethod: 'cash',
     notes: '',

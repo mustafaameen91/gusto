@@ -10,6 +10,7 @@ exports.create = (req, res) => {
 
   const recipe = {
     menuItemId: req.body.menuItemId,
+    sizeId: req.body.sizeId || null,
     ingredientId: req.body.ingredientId,
     quantityNeeded: req.body.quantityNeeded,
     notes: req.body.notes || null
@@ -28,22 +29,21 @@ exports.create = (req, res) => {
 // Bulk create/update recipes for a menu item
 exports.bulkUpdate = (req, res) => {
   const menuItemId = req.params.menuItemId;
-  const recipes = req.body.recipes || [];
+  const recipes = req.body.recipes;
 
-  console.log('📝 Backend: Received bulkUpdate request');
-  console.log('  menuItemId:', menuItemId);
-  console.log('  recipes array length:', recipes.length);
-  console.log('  Full recipes data:', JSON.stringify(recipes, null, 2));
+  // The body is the item's COMPLETE recipe set (base lines with sizeId null + per-size
+  // lines); everything not sent is removed.
+  if (!Array.isArray(recipes)) {
+    return res.status(400).json({ message: "يجب إرسال قائمة الوصفات كاملة (recipes)." });
+  }
 
-  // Validate recipes array
-  for (let recipe of recipes) {
-    if (!recipe.ingredientId || !recipe.quantityNeeded) {
-      console.error('❌ Validation failed for recipe:', recipe);
+  for (const recipe of recipes) {
+    const qty = Number(recipe.quantityNeeded);
+    if (!recipe.ingredientId || !Number.isFinite(qty) || qty <= 0) {
       return res.status(400).json({
-        message: "Each recipe must have ingredientId and quantityNeeded!"
+        message: "كل سطر في الوصفة يحتاج مكوّناً وكمية أكبر من صفر."
       });
     }
-    console.log(`  ✓ Recipe valid: ingredientId=${recipe.ingredientId}, sizeId=${recipe.sizeId}, qty=${recipe.quantityNeeded}`);
   }
 
   Recipe.bulkCreate(menuItemId, recipes, (err, data) => {
@@ -53,7 +53,6 @@ exports.bulkUpdate = (req, res) => {
         message: err.message || "Error updating recipes."
       });
     }
-    console.log('✅ Recipes saved successfully! Rows affected:', data.affectedRows);
     res.json({
       message: "Recipes updated successfully!",
       data: data

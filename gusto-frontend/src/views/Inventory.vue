@@ -287,7 +287,8 @@
                   variant="text"
                   color="warning"
                   @click="pullMaterial(item)"
-                  title="سحب مادة"
+                  :title="`سحب مادة — ${item.ingredientName}`"
+                  :aria-label="`سحب مادة — ${item.ingredientName}`"
                 >
                   <PhArrowDown :size="18" weight="bold" />
                 </v-btn>
@@ -297,7 +298,8 @@
                   variant="text"
                   color="info"
                   @click="viewTransactions(item)"
-                  title="الحركات"
+                  :title="`الحركات — ${item.ingredientName}`"
+                  :aria-label="`الحركات — ${item.ingredientName}`"
                 >
                   <PhClockCounterClockwise :size="18" weight="bold" />
                 </v-btn>
@@ -307,7 +309,8 @@
                   variant="text"
                   color="success"
                   @click="adjustStock(item)"
-                  title="تعديل المخزون"
+                  :title="`تعديل المخزون — ${item.ingredientName}`"
+                  :aria-label="`تعديل المخزون — ${item.ingredientName}`"
                 >
                   <PhPlusMinus :size="18" weight="bold" />
                 </v-btn>
@@ -317,17 +320,20 @@
                   variant="text"
                   color="primary"
                   @click="editIngredient(item)"
-                  title="تعديل"
+                  :title="`تعديل — ${item.ingredientName}`"
+                  :aria-label="`تعديل — ${item.ingredientName}`"
                 >
                   <PhPencilSimple :size="18" weight="bold" />
                 </v-btn>
                 <v-btn
+                  v-if="isAdmin"
                   icon
                   size="small"
                   variant="text"
                   color="error"
                   @click="deleteIngredient(item)"
-                  title="حذف"
+                  :title="`حذف — ${item.ingredientName}`"
+                  :aria-label="`حذف — ${item.ingredientName}`"
                 >
                   <PhTrash :size="18" weight="bold" />
                 </v-btn>
@@ -386,12 +392,16 @@
             <v-col cols="12" md="4">
               <v-text-field
                 v-model.number="ingredientForm.currentStock"
-                label="المخزون الحالي"
+                :label="editingItem ? 'المخزون الحالي' : 'المخزون الافتتاحي'"
                 type="number"
                 step="0.001"
                 variant="outlined"
                 density="comfortable"
                 :suffix="ingredientForm.unit"
+                :disabled="!!editingItem"
+                :readonly="!!editingItem"
+                :hint="editingItem ? 'يُعدّل المخزون من زر الهدر/التسوية أو من الاستلام' : ''"
+                :persistent-hint="!!editingItem"
                 color="#046375"
               />
             </v-col>
@@ -548,6 +558,8 @@
             suffix="د.ع"
             variant="outlined"
             density="comfortable"
+            :hint="`اتركه فارغاً لاستخدام متوسط التكلفة الحالي (${Number(adjustingItem.costPerUnit || 0).toLocaleString()} د.ع)`"
+            persistent-hint
             class="mb-4"
             color="#046375"
           />
@@ -574,7 +586,7 @@
                 <div class="font-weight-bold mb-1">المخزون بعد التعديل:</div>
                 <div class="text-caption">
                   {{ adjustingItem.currentStock }} 
-                  {{ adjustForm.transactionType === 'purchase' ? '+' : adjustForm.transactionType === 'adjustment' ? '±' : '-' }}
+                  {{ adjustForm.transactionType === 'adjustment' ? (Number(adjustForm.quantity) < 0 ? '-' : '+') : '-' }}
                   {{ Math.abs(adjustForm.quantity) }} 
                   = {{ newStockAmount }}
                 </div>
@@ -836,6 +848,8 @@ import {
 
 const toast = useToast()
 const authStore = useAuthStore()
+// DELETE /inventory/:id is admin-only on the backend
+const isAdmin = computed(() => authStore.user?.role === 'admin')
 
 const currentDate = computed(() => {
   return formatCurrentDateArabic()
@@ -892,8 +906,10 @@ const units = [
   { value: 'bag', title: 'كيس' }
 ]
 
+// Backend accepts usage / waste / adjustment only (purchases go through receiving)
 const transactionTypes = [
-  { value: 'waste', title: '🗑️ هدر (إتلاف)' }
+  { value: 'waste', title: '🗑️ هدر (إتلاف)' },
+  { value: 'adjustment', title: '⚙️ تسوية (جرد) — موجب للإضافة، سالب للخصم' }
 ]
 
 const headers = [
@@ -1081,7 +1097,7 @@ const saveIngredient = async () => {
     await loadIngredients()
     closeAddDialog()
   } catch (error) {
-    toast.error('فشل حفظ المكون')
+    toast.error(error.response?.data?.message || 'فشل حفظ المكون')
     console.error(error)
   } finally {
     saving.value = false
@@ -1122,7 +1138,7 @@ const savePullMaterial = async () => {
     showPullMaterialDialog.value = false
     pullForm.value = { quantity: 0, notes: '' }
   } catch (error) {
-    toast.error('فشل سحب المادة')
+    toast.error(error.response?.data?.message || 'فشل سحب المادة')
     console.error(error)
   } finally {
     saving.value = false
@@ -1145,29 +1161,36 @@ const saveAdjustment = async () => {
     toast.error('الكمية مطلوبة')
     return
   }
+  if (newStockAmount.value < 0) {
+    toast.error('لا يمكن أن يصبح المخزون أقل من صفر')
+    return
+  }
 
   saving.value = true
   try {
-    // Determine quantity sign based on transaction type
-    let quantity = Math.abs(Number(adjustForm.value.quantity))
-    if (adjustForm.value.transactionType === 'usage' || adjustForm.value.transactionType === 'waste') {
-      quantity = -quantity // Negative for deduction
-    }
+    // usage/waste always deduct; adjustment keeps its sign (+ adds, − removes)
+    const raw = Number(adjustForm.value.quantity)
+    const quantity = adjustForm.value.transactionType === 'adjustment' ? raw : -Math.abs(raw)
 
+    // costPerUnit is optional: the backend falls back to the ingredient's average cost
+    // and computes totalCost itself
+    const cost = Number(adjustForm.value.costPerUnit)
     const data = {
       transactionType: adjustForm.value.transactionType,
       quantity: quantity,
-      costPerUnit: adjustForm.value.costPerUnit,
-      totalCost: adjustForm.value.costPerUnit ? adjustForm.value.costPerUnit * Math.abs(quantity) : null,
+      costPerUnit: cost > 0 ? cost : null,
       notes: adjustForm.value.notes
     }
-    
-    await inventoryAPI.adjustStock(adjustingItem.value.idIngredient, data)
-    toast.success('✅ تم تعديل المخزون بنجاح')
+
+    const response = await inventoryAPI.adjustStock(adjustingItem.value.idIngredient, data)
+    const after = response?.data?.currentStock
+    toast.success(after !== undefined
+      ? `✅ تم تعديل المخزون — الرصيد الآن ${Number(after)} ${adjustingItem.value.unit}`
+      : '✅ تم تعديل المخزون بنجاح')
     await loadIngredients()
     showAdjustDialog.value = false
   } catch (error) {
-    toast.error('فشل تعديل المخزون')
+    toast.error(error.response?.data?.message || 'فشل تعديل المخزون')
     console.error(error)
   } finally {
     saving.value = false
@@ -1197,7 +1220,7 @@ const deleteIngredient = async (item) => {
     toast.success('تم حذف المكون')
     await loadIngredients()
   } catch (error) {
-    toast.error('فشل حذف المكون')
+    toast.error(error.response?.data?.message || 'فشل حذف المكون')
     console.error(error)
   }
 }

@@ -68,6 +68,8 @@
               size="small"
               color="#046375"
               @click="goToProfile(item.idCustomer)"
+              aria-label="عرض ملف العميل"
+              title="عرض ملف العميل"
             >
               <PhEye :size="18" weight="bold" />
             </v-btn>
@@ -191,8 +193,9 @@ async function loadCustomers() {
   try {
     const res = await customerAPI.getAll({ withBalance: true })
     customers.value = res.data || []
-  } catch (_) {
+  } catch (e) {
     customers.value = []
+    toast.error(e.response?.data?.message || 'فشل تحميل العملاء')
   } finally {
     loading.value = false
   }

@@ -57,11 +57,12 @@
               class="pos-item"
               :class="{ 'pos-item--off': !item.isAvailable }"
             >
-              <div class="pos-item__img">
-                <img :src="logoImg" :alt="item.itemName" loading="lazy" decoding="async" />
+              <div class="pos-item__img" :class="{ 'pos-item__img--photo': item.imageUrl }">
+                <img :src="item.imageUrl || logoImg" :alt="item.itemName" loading="lazy" decoding="async" @error="onItemImgError" />
               </div>
               <div class="pos-item__body">
                 <span class="pos-item__name" style="text-align: center">{{ item.itemName }}</span>
+                <span class="pos-item__price">{{ Number(item.basePrice).toLocaleString() }} د.ع</span>
               </div>
               <span v-if="!item.isAvailable" class="pos-item__badge">
                 {{ item.kitchenStock === 0 ? "نفذت الكمية" : "غير متاح" }}
@@ -104,17 +105,17 @@
               </div>
               <div class="pos-cart-item__controls">
                 <div class="pos-qty">
-                  <button class="pos-qty__btn" @click="decrementQuantity(index)">
-                    <PhMinus :size="12" weight="bold" />
+                  <button class="pos-qty__btn" @click="decrementQuantity(index)" aria-label="إنقاص الكمية" title="إنقاص الكمية">
+                    <PhMinus :size="18" weight="bold" />
                   </button>
                   <span class="pos-qty__val">{{ item.quantity }}</span>
-                  <button class="pos-qty__btn pos-qty__btn--plus" @click="incrementQuantity(index)">
-                    <PhPlus :size="12" weight="bold" />
+                  <button class="pos-qty__btn pos-qty__btn--plus" @click="incrementQuantity(index)" aria-label="زيادة الكمية" title="زيادة الكمية">
+                    <PhPlus :size="18" weight="bold" />
                   </button>
                 </div>
                 <span class="pos-cart-item__total">{{ (Number(item.basePrice) * item.quantity).toLocaleString() }}</span>
-                <button class="pos-cart-item__remove" @click="removeFromCart(index)">
-                  <PhTrash :size="14" weight="bold" />
+                <button class="pos-cart-item__remove" @click="removeFromCart(index)" aria-label="حذف الصنف" title="حذف الصنف">
+                  <PhTrash :size="18" weight="bold" />
                 </button>
               </div>
             </div>
@@ -132,7 +133,7 @@
             <!-- Payment & Sale Type -->
             <div class="pos-pay-row">
               <div class="pos-toggle">
-                <button class="pos-toggle__btn" :class="{ 'pos-toggle__btn--active': paymentMethod === 'cash' }" @click="paymentMethod = 'cash'"><PhMoney :size="16" weight="bold" /> نقدي</button>
+                <button class="pos-toggle__btn" :class="{ 'pos-toggle__btn--active': paymentMethod === 'cash' }" @click="paymentMethod = 'cash'"><PhMoney :size="16" weight="bold" /> نقداً</button>
                 <button class="pos-toggle__btn" :class="{ 'pos-toggle__btn--active': paymentMethod === 'card' }" @click="paymentMethod = 'card'">
                   <PhCreditCard :size="16" weight="bold" /> بطاقة
                 </button>
@@ -146,9 +147,9 @@
                     selectedCustomerId = null;
                   "
                 >
-                  نقدي
+                  بيع نقدي
                 </button>
-                <button class="pos-toggle__btn" :class="{ 'pos-toggle__btn--active': saleType === 'credit' }" @click="saleType = 'credit'">آجل</button>
+                <button class="pos-toggle__btn" :class="{ 'pos-toggle__btn--active': saleType === 'credit' }" @click="saleType = 'credit'">بيع آجل</button>
               </div>
             </div>
 
@@ -280,6 +281,11 @@ const router = useRouter();
 
 const logoImg = computed(() => logoPng);
 
+// Broken/missing upload → fall back to the logo (once, to avoid an error loop)
+const onItemImgError = (e) => {
+  if (e?.target && e.target.src !== logoPng) e.target.src = logoPng;
+};
+
 const currentDate = computed(() => formatCurrentDateArabic());
 
 const categories = ref([]);
@@ -332,8 +338,10 @@ const filteredMenuItems = computed(() => {
     })
     .map((item) => {
       // For kitchen-category items, mark as out-of-stock if not in kitchen storage
-      if (isKitchenCategory) {
-        const stock = kitchenStockMap.get(item.idMenuItem) || 0;
+      // Only dishes added to the kitchen display are limited to their ready portions;
+      // the rest are made to order and always sellable (same rule as the server).
+      if (isKitchenCategory && kitchenStockMap.has(item.idMenuItem)) {
+        const stock = kitchenStockMap.get(item.idMenuItem);
         return { ...item, isAvailable: item.isAvailable && stock > 0, kitchenStock: stock };
       }
       return { ...item, kitchenStock: null };
@@ -404,7 +412,8 @@ const loadCategories = async () => {
       }
     } else if (Array.isArray(response)) data = response;
     categories.value = data;
-    if (categories.value.length > 0) selectedCategory.value = categories.value[0].idCategory;
+    // Select the first category that actually has items (tabs only show those)
+    if (categories.value.length > 0) selectedCategory.value = categoriesForDisplay.value[0]?.idCategory ?? null;
     else toast.warning("لا توجد تصنيفات متاحة");
   } catch (error) {
     toast.error("فشل تحميل التصنيفات");
@@ -416,7 +425,7 @@ const loadCategories = async () => {
 
 const loadKitchenStock = async () => {
   try {
-    const res = await kitchenStockAPI.getMenu(false);
+    const res = await kitchenStockAPI.getMenu(true);
     kitchenStock.value = Array.isArray(res.data) ? res.data : res.data?.items || [];
   } catch (_) {
     kitchenStock.value = [];
@@ -477,7 +486,7 @@ const preloadAllSizes = async () => {
 const addToCart = (item) => {
   selectedItem.value = item;
   itemSize.value = null;
-  specialInstructions.value = "لاتوجد";
+  specialInstructions.value = "";
   // Use cached sizes (instant) or fetch if not cached yet
   if (sizesCache.value[item.idMenuItem]) {
     availableSizes.value = sizesCache.value[item.idMenuItem];
@@ -499,6 +508,8 @@ const addToCart = (item) => {
 };
 
 function isKitchenMenuItem(menuItemId) {
+  // Limited only when the dish has ready portions tracked in kitchen stock
+  if (!(kitchenStock.value || []).some((x) => x.menuItemId === menuItemId)) return false;
   const item = (menuItems.value || []).find((m) => m.idMenuItem === menuItemId);
   if (!item) return false;
   const cat = (categories.value || []).find((c) => c.idCategory === item.categoryId);
@@ -538,13 +549,13 @@ const confirmAddToCart = () => {
     selectedSizeId: sizeObj ? sizeObj.idItemSize : null,
     selectedSizeName: sizeObj ? sizeObj.sizeName : null,
     basePrice: finalPrice,
-    specialInstructions: specialInstructions.value || "لاتوجد",
+    specialInstructions: (specialInstructions.value || "").trim(),
   });
   toast.success(`تمت إضافة ${selectedItem.value.itemName}${sizeObj ? " - " + sizeObj.sizeName : ""}`);
   showItemDialog.value = false;
   selectedItem.value = null;
   itemSize.value = null;
-  specialInstructions.value = "لاتوجد";
+  specialInstructions.value = "";
   availableSizes.value = [];
 };
 
@@ -611,7 +622,7 @@ const checkout = async () => {
         quantity: item.quantity,
         price: item.basePrice,
         itemSizeId: item.selectedSizeId || null,
-        specialInstructions: item.specialInstructions || "بدون ملاحظات",
+        specialInstructions: item.specialInstructions || null,
       })),
     };
     const response = await orderAPI.create(orderData);
@@ -620,43 +631,89 @@ const checkout = async () => {
       const id = selectedCustomerId.value;
       setTimeout(() => router.push(`/customers/${id}`), 800);
     }
-    const orderTotal = cart.value.reduce((sum, item) => sum + (Number(item.basePrice) || 0) * (Number(item.quantity) || 0), 0);
+    // The server re-prices every order: use its numbers, not the cart's
+    const saved = response.data || {};
+    const serverItems = Array.isArray(saved.items) ? saved.items : [];
+    const lines = cart.value.map((item, i) => {
+      const unitPrice = Number(serverItems[i]?.price ?? item.basePrice) || 0;
+      const quantity = Number(serverItems[i]?.quantity ?? item.quantity) || 0;
+      return { item, unitPrice, quantity, lineTotal: unitPrice * quantity };
+    });
+    const serverSubtotal = lines.reduce((sum, l) => sum + l.lineTotal, 0);
+    const serverDiscount = Number(saved.discount) || 0;
+    const orderTotal = saved.totalAmount != null ? Number(saved.totalAmount) || 0 : Math.max(0, serverSubtotal - serverDiscount);
     if (window.electronAPI && window.electronAPI.showOrderOnDisplay) {
       try {
         await window.electronAPI.showOrderOnDisplay({
-          orderNumber: response.data.orderNumber,
+          orderNumber: saved.orderNumber,
           orderDate: new Date().toISOString(),
           totalAmount: orderTotal,
           totalPrice: orderTotal,
-          orderItems: cart.value.map((item) => ({
-            name: item.itemName,
-            size: item.selectedSizeName || null,
-            quantity: Number(item.quantity) || 0,
-            price: Number(item.basePrice) || 0,
-            total: (Number(item.basePrice) || 0) * (Number(item.quantity) || 0),
+          orderItems: lines.map((l) => ({
+            name: l.item.itemName,
+            size: l.item.selectedSizeName || null,
+            quantity: l.quantity,
+            price: l.unitPrice,
+            total: l.lineTotal,
           })),
         });
       } catch (_) {}
     }
-    // Silent print via Electron — frontend builds the HTML receipt
-    if (window.electronAPI && window.electronAPI.printReceipt) {
+    // Electron (POS): one order → cashier receipt (+ drawer for cash) and kitchen/grill tickets
+    // at the same time, on the printers set up in this POS's printer settings.
+    if (window.electronAPI?.printOrder) {
+      const printJob = {
+        orderNumber: saved.orderNumber,
+        createdAt: new Date().toISOString(),
+        table: tableNumber.value || null,
+        orderType,
+        saleType: saleType.value,
+        cashierName: authStore.user?.fullName || null,
+        customerName: customerName.value || null,
+        customerPhone: customerPhone.value || null,
+        notes: orderNotes.value || null,
+        subtotal: serverSubtotal,
+        discount: serverDiscount,
+        total: orderTotal,
+        items: lines.map((l) => ({
+          name: l.item.itemName,
+          size: l.item.selectedSizeName || null,
+          quantity: l.quantity,
+          unitPrice: l.unitPrice,
+          lineTotal: l.lineTotal,
+          notes: l.item.specialInstructions || "",
+          categoryId: l.item.categoryId ?? null,
+        })),
+      };
+      // Not awaited: the cashier can start the next order while the printers work
+      window.electronAPI
+        .printOrder(printJob)
+        .then((res) => {
+          const failed = (res?.results || []).filter((r) => r.status === "failed");
+          failed.forEach((r) => notifyPrintFailure(printJob, r));
+          if (!res?.results?.length) toast.warning("لا توجد طابعات مفعّلة في إعدادات هذا الجهاز");
+        })
+        .catch((e) => toast.error(`تعذّرت الطباعة للطلب #${saved.orderNumber}: ${e?.message || e}`));
+    } else if (window.electronAPI && window.electronAPI.printReceipt) {
       try {
         const receiptHtml = buildReceiptHtml({
-          orderNumber: response.data.orderNumber,
+          orderNumber: saved.orderNumber,
           date: new Date().toLocaleString("ar-EG", { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" }),
           orderType,
+          saleType: saleType.value,
           table: tableNumber.value || null,
-          discount: calculatedDiscountAmount.value,
-          subtotal: subtotal.value,
-          total: total.value,
+          discount: serverDiscount,
+          subtotal: serverSubtotal,
+          total: orderTotal,
           customerName: customerName.value || null,
           customerPhone: customerPhone.value || null,
           orderNotes: orderNotes.value || null,
-          items: cart.value.map((item) => ({
-            name: item.itemName + (item.selectedSizeName ? ` (${item.selectedSizeName})` : ""),
-            quantity: Number(item.quantity) || 0,
-            unitPrice: Number(item.basePrice) || 0,
-            lineTotal: (Number(item.basePrice) || 0) * (Number(item.quantity) || 0),
+          items: lines.map((l) => ({
+            name: l.item.itemName + (l.item.selectedSizeName ? ` (${l.item.selectedSizeName})` : ""),
+            notes: l.item.specialInstructions || "",
+            quantity: l.quantity,
+            unitPrice: l.unitPrice,
+            lineTotal: l.lineTotal,
           })),
         });
         await window.electronAPI.printReceipt({ type: "html", html: receiptHtml });
@@ -665,10 +722,18 @@ const checkout = async () => {
     clearCart();
     await loadKitchenStock();
   } catch (error) {
-    if (error.response?.status === 400 && error.response?.data?.code === "INSUFFICIENT_KITCHEN_STOCK") {
-      toast.error(error.response?.data?.message || "الكمية غير متوفرة");
-    } else if (error.response?.status === 400 && error.response?.data?.code === "NO_OPEN_SHIFT") {
-      toast.error("يجب فتح الشفت أولاً");
+    // Cart is kept on every error so the cashier can fix and retry
+    const code = error.response?.data?.code;
+    const serverMsg = error.response?.data?.message;
+    if (code === "INSUFFICIENT_KITCHEN_STOCK") {
+      toast.error(serverMsg || "الكمية غير متوفرة");
+      loadKitchenStock();
+    } else if (code === "CREDIT_LIMIT_EXCEEDED") {
+      toast.error(serverMsg || "تجاوز حد الائتمان للعميل");
+    } else if (code === "DISCOUNT_NOT_ALLOWED") {
+      toast.error(serverMsg || "الخصم مسموح للمشرف أو المدير فقط");
+    } else if (code === "NO_OPEN_SHIFT") {
+      toast.error(serverMsg || "يجب فتح الشفت أولاً");
     } else {
       toast.error(error.response?.data?.message || "فشل إنشاء الطلب");
     }
@@ -677,19 +742,45 @@ const checkout = async () => {
   }
 };
 
+// A printer failed (no paper, unplugged, wrong IP): say which one and let a tap reprint on it alone
+function notifyPrintFailure(printJob, failure) {
+  toast.error(`لم تُطبع ورقة «${failure.name}» للطلب #${printJob.orderNumber}: ${failure.error} — اضغط هنا لإعادة الطباعة`, {
+    timeout: false,
+    closeOnClick: true,
+    onClick: () =>
+      window.electronAPI
+        .printOrder(printJob, { onlyIds: [failure.id] })
+        .then((res) => {
+          const again = (res?.results || []).find((x) => x.id === failure.id);
+          if (again?.status === "printed") toast.success(`طُبعت ورقة «${failure.name}» للطلب #${printJob.orderNumber}`);
+          else notifyPrintFailure(printJob, again || failure);
+        }),
+  });
+}
+
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
 function buildReceiptHtml(data) {
   const logoSrc = window.__ELECTRON_LOGOS__?.logoPng || "";
-  const paymentLabel = data.orderType === "card" ? "Card" : "Cash";
+  const paymentLabel = data.saleType === "credit" ? "آجل" : data.orderType === "card" ? "بطاقة" : "نقدي";
 
   const itemsHtml = data.items
     .map(
       (item) =>
         `<div class="item-row">
-      <span class="item-name">${item.name}</span>
+      <span class="item-name">${escapeHtml(item.name)}</span>
       <span class="item-dots"></span>
-      <span class="item-price">${item.lineTotal.toLocaleString()} IQD</span>
+      <span class="item-price">${item.lineTotal.toLocaleString()} د.ع</span>
     </div>
-    <div class="item-qty">x${item.quantity}  @${item.unitPrice.toLocaleString()}</div>`,
+    <div class="item-qty">x${item.quantity}  @${item.unitPrice.toLocaleString()}</div>
+    ${item.notes ? `<div class="item-qty">📝 ${escapeHtml(item.notes)}</div>` : ""}`,
     )
     .join("");
 
@@ -749,9 +840,9 @@ function buildReceiptHtml(data) {
   </div>
   <hr class="divider">
   <div class="info">
-    <div>رقم الطلب: <strong>${data.orderNumber}</strong></div>
+    <div>رقم الطلب: <strong>${escapeHtml(data.orderNumber)}</strong></div>
     <div>التاريخ: ${data.date}</div>
-    ${data.table ? `<div>الطاولة: ${data.table}</div>` : ""}
+    ${data.table ? `<div>الطاولة: ${escapeHtml(data.table)}</div>` : ""}
     <div>الدفع: ${paymentLabel}</div>
   </div>
   <hr class="divider">
@@ -762,25 +853,25 @@ function buildReceiptHtml(data) {
       ? `
   <div style="display:flex;justify-content:space-between;font-size:11px;padding:2px 0;">
     <span>المجموع الفرعي</span>
-    <span>${data.subtotal.toLocaleString()} IQD</span>
+    <span>${data.subtotal.toLocaleString()} د.ع</span>
   </div>
   <div style="display:flex;justify-content:space-between;font-size:11px;padding:2px 0;">
     <span>الخصم</span>
-    <span>-${data.discount.toLocaleString()} IQD</span>
+    <span>-${data.discount.toLocaleString()} د.ع</span>
   </div>
   <hr class="divider-dashed">
   `
       : ""
   }
   <div class="total-section">
-    <div class="total-label">المجموع: ${data.total.toLocaleString()} IQD</div>
+    <div class="total-label">المجموع: ${data.total.toLocaleString()} د.ع</div>
   </div>
-  ${data.customerName ? `<div class="customer-info">${data.customerName}${data.customerPhone ? " - " + data.customerPhone : ""}</div>` : ""}
-  ${data.orderNotes ? `<div class="order-notes-box">📝 ${data.orderNotes}</div>` : ""}
+  ${data.customerName ? `<div class="customer-info">${escapeHtml(data.customerName)}${data.customerPhone ? " - " + escapeHtml(data.customerPhone) : ""}</div>` : ""}
+  ${data.orderNotes ? `<div class="order-notes-box">📝 ${escapeHtml(data.orderNotes)}</div>` : ""}
   <hr class="divider">
   <div class="footer">
-    <div class="thank">!شكراً لزيارتكم</div>
-    <div>Thank You! Visit Again</div>
+    <div class="thank" dir="rtl">شكراً لزيارتكم!</div>
+    <div dir="rtl">نتمنى رؤيتكم مجدداً</div>
   </div>
 </body>
 </html>`;
@@ -1052,6 +1143,13 @@ onMounted(async () => {
   transition: transform 0.3s ease;
 }
 
+.pos-item__img--photo img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  filter: none;
+}
+
 .pos-item:hover .pos-item__img img {
   transform: scale(1.08);
 }
@@ -1246,15 +1344,16 @@ onMounted(async () => {
 }
 
 .pos-qty__btn {
-  width: 26px;
-  height: 26px;
+  width: 44px;
+  height: 44px;
   display: flex;
   align-items: center;
   justify-content: center;
   background: none;
   border: none;
-  color: var(--t-text-faint);
+  color: var(--t-text-secondary);
   cursor: pointer;
+  touch-action: manipulation;
   transition: all 0.15s;
 }
 
@@ -1271,7 +1370,7 @@ onMounted(async () => {
 }
 
 .pos-qty__val {
-  min-width: 24px;
+  min-width: 28px;
   text-align: center;
   font-size: 0.8125rem;
   font-weight: 700;
@@ -1287,16 +1386,17 @@ onMounted(async () => {
 }
 
 .pos-cart-item__remove {
-  width: 26px;
-  height: 26px;
+  width: 44px;
+  height: 44px;
   display: flex;
   align-items: center;
   justify-content: center;
   border-radius: 6px;
   border: none;
   background: none;
-  color: var(--t-text-faint);
+  color: var(--t-text-secondary);
   cursor: pointer;
+  touch-action: manipulation;
   transition: all 0.15s;
 }
 

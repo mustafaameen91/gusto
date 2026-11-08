@@ -215,13 +215,17 @@ import { useAuthStore } from '@/stores/auth'
 import AppLayout from '@/components/AppLayout.vue'
 import logoImg from '@/assets/logo.png'
 import { purchaseAPI, inventoryAPI } from '@/services/api'
+import { useToast } from 'vue-toastification'
 import { formatCurrentDateArabic } from '@/utils/dateFormatter'
-import { 
-  PhClock, PhStack, PhWarning, PhPackage, PhCurrencyDollar, 
-  PhTrendUp, PhCheckCircle 
+import {
+  PhClock, PhStack, PhWarning, PhPackage, PhCurrencyDollar,
+  PhTrendUp, PhCheckCircle
 } from '@phosphor-icons/vue'
 
 const authStore = useAuthStore()
+const toast = useToast()
+// Figures that failed to load are shown as 0, so say so instead of passing them off as real
+const warnLoad = (what, err) => toast.error(err?.response?.data?.message || `تعذّر تحميل ${what} — الأرقام المعروضة غير مكتملة`)
 
 const stats = ref({
   pendingPurchases: 0,
@@ -251,6 +255,7 @@ const loadDashboardData = async () => {
       stats.value.partialPurchases = purchases.filter(p => p.status === 'partially_received').length
     } catch (err) {
       console.error('Failed to load purchases:', err)
+      warnLoad('المشتريات', err)
       stats.value.pendingPurchases = 0
       stats.value.partialPurchases = 0
     }
@@ -263,6 +268,7 @@ const loadDashboardData = async () => {
         : 0
     } catch (err) {
       console.error('Failed to load low stock:', err)
+      warnLoad('المواد منخفضة المخزون', err)
       stats.value.lowStock = 0
     }
 
@@ -279,6 +285,7 @@ const loadDashboardData = async () => {
       }, 0)
     } catch (err) {
       console.error('Failed to load inventory:', err)
+      warnLoad('المخزون', err)
       stats.value.totalInventoryItems = 0
       stats.value.totalInventoryValue = 0
     }

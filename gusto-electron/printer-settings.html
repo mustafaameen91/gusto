@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self';">
+<title>إعدادات الطابعات والخادم</title>
+<style>
+  @font-face { font-family: Tajawal; font-weight: 700; src: url("assets/fonts/Tajawal-Bold.ttf"); }
+  @font-face { font-family: Tajawal; font-weight: 500; src: url("assets/fonts/Tajawal-Medium.ttf"); }
+  :root { --brand: #046375; --brand-dark: #034b59; --gold: #D4A574; --bg: #f5f2ed; --surface: #fff; --text: #2c2419; --muted: rgba(44,36,25,.7); --border: #ddd6cc; --ok: #047857; --err: #b91c1c; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: Tajawal, Tahoma, sans-serif; font-weight: 500; background: var(--bg); color: var(--text); font-size: 15px; }
+  header { background: linear-gradient(135deg, var(--brand), #1F7F90); color: #fff; padding: 18px 24px; display: flex; align-items: center; gap: 14px; }
+  header img { width: 64px; height: 48px; object-fit: contain; background: #fff; border-radius: 10px; padding: 4px; }
+  header h1 { margin: 0; font-size: 22px; font-weight: 700; } header p { margin: 2px 0 0; opacity: .9; font-size: 14px; }
+  main { padding: 20px 24px 100px; max-width: 1280px; margin: 0 auto; }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 18px; }
+  h2 { font-size: 17px; margin: 0 0 12px; font-weight: 700; color: var(--brand-dark); }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(330px, 1fr)); gap: 16px; margin-top: 16px; }
+  label { display: block; font-size: 14px; margin: 12px 0 4px; color: var(--muted); }
+  input[type=text], input[type=number], select { width: 100%; height: 44px; border: 1px solid var(--border); border-radius: 10px; padding: 0 12px; font: inherit; font-size: 15px; background: #fff; color: var(--text); }
+  input:focus, select:focus, button:focus-visible { outline: 3px solid rgba(4,99,117,.35); outline-offset: 1px; border-color: var(--brand); }
+  .ltr { direction: ltr; text-align: left; }
+  .row { display: flex; gap: 10px; align-items: flex-end; } .row > * { flex: 1; }
+  .seg { display: flex; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; height: 44px; }
+  .seg button { flex: 1; border: 0; background: #fff; font: inherit; cursor: pointer; color: var(--text); }
+  .seg button.on { background: var(--brand); color: #fff; font-weight: 700; }
+  .head { display: flex; align-items: center; gap: 10px; }
+  .head input { font-weight: 700; font-size: 17px; }
+  .switch { display: flex; align-items: center; gap: 8px; white-space: nowrap; cursor: pointer; min-height: 44px; color: var(--text); margin: 0; }
+  .switch input { width: 22px; height: 22px; accent-color: var(--brand); }
+  .cats { display: flex; flex-wrap: wrap; gap: 8px; }
+  .cats label { margin: 0; display: flex; align-items: center; gap: 6px; border: 1px solid var(--border); border-radius: 999px; padding: 0 12px; min-height: 40px; cursor: pointer; color: var(--text); }
+  .cats input { accent-color: var(--brand); width: 18px; height: 18px; }
+  .hint { font-size: 13px; color: var(--muted); margin-top: 6px; line-height: 1.6; }
+  .btns { display: flex; gap: 8px; margin-top: 16px; flex-wrap: wrap; }
+  .btn { min-height: 44px; padding: 0 18px; border-radius: 10px; border: 1px solid var(--brand); background: #fff; color: var(--brand); font: inherit; font-weight: 700; cursor: pointer; }
+  .btn.primary { background: var(--brand); color: #fff; } .btn:disabled { opacity: .5; cursor: wait; }
+  .status { margin-top: 10px; font-size: 14px; min-height: 22px; line-height: 1.6; }
+  .status.ok { color: var(--ok); } .status.err { color: var(--err); }
+  .off { opacity: .55; }
+  footer { position: fixed; bottom: 0; left: 0; right: 0; background: #fff; border-top: 1px solid var(--border); padding: 12px 24px; display: flex; gap: 10px; align-items: center; }
+  footer .status { margin: 0; flex: 1; }
+  .badge { font-size: 12px; background: #fbf3e9; border: 1px solid var(--gold); color: #6b4a22; border-radius: 999px; padding: 2px 10px; }
+</style>
+</head>
+<body>
+<header>
+  <img src="assets/logo.png" alt="جوستو">
+  <div><h1>إعدادات الطابعات والخادم</h1><p>تُحفظ على هذا الجهاز فقط</p></div>
+</header>
+<main>
+  <section class="card">
+    <h2>عنوان الخادم</h2>
+    <div class="row">
+      <div><label for="serverUrl">رابط النظام (الواجهة والخادم)</label><input id="serverUrl" type="text" class="ltr" placeholder="https://gusto.example.com"></div>
+      <div style="flex:0 0 auto"><button class="btn" id="checkServer">فحص الاتصال</button></div>
+    </div>
+    <div class="status" id="serverStatus"></div>
+  </section>
+  <div class="grid" id="printers"></div>
+</main>
+<footer>
+  <button class="btn primary" id="save">حفظ الإعدادات</button>
+  <button class="btn" id="close">إغلاق</button>
+  <div class="status" id="saveStatus"></div>
+</footer>
+
+<template id="printerTpl">
+  <section class="card printer">
+    <div class="head">
+      <input type="text" data-f="name" aria-label="اسم الطابعة">
+      <label class="switch"><input type="checkbox" data-f="enabled"> مفعّلة</label>
+    </div>
+    <div class="body">
+      <label>نوع الطباعة</label>
+      <div class="seg" data-seg="role"><button data-v="receipt">فاتورة الزبون (بالأسعار)</button><button data-v="ticket">تذكرة تحضير</button></div>
+      <label>طريقة التوصيل</label>
+      <div class="seg" data-seg="connection"><button data-v="network">شبكة (LAN)</button><button data-v="usb">USB</button></div>
+      <div class="net row">
+        <div><label>عنوان IP للطابعة</label><input type="text" data-f="host" class="ltr" placeholder="192.168.1.100"></div>
+        <div style="flex:0 0 110px"><label>المنفذ</label><input type="number" data-f="port" class="ltr"></div>
+      </div>
+      <div class="usb">
+        <label>طابعة Windows</label><select data-f="systemName"></select>
+        <div class="hint">يجب تثبيت تعريف الطابعة على Windows أولاً.</div>
+      </div>
+      <div class="row">
+        <div><label>عرض الورق</label><select data-f="paper"><option value="80">80 مم</option><option value="58">58 مم</option></select></div>
+        <div><label>عدد النسخ</label><select data-f="copies"><option>1</option><option>2</option><option>3</option></select></div>
+      </div>
+      <div class="ticket">
+        <label>الأصناف التي تطبعها هذه الطابعة</label>
+        <div class="cats"></div>
+        <div class="hint">بدون اختيار = تطبع الطلب كاملاً. مثال: اختر «مشويات» لطابعة الشواية فقط.</div>
+      </div>
+      <div class="receipt">
+        <label class="switch" style="margin-top:12px"><input type="checkbox" data-f="openDrawer"> درج النقود موصول بهذه الطابعة</label>
+        <div class="drawer"><label>منفذ الدرج</label><select data-f="drawerPin"><option value="0">الافتراضي (Pin 2)</option><option value="1">البديل (Pin 5)</option></select>
+        <div class="hint">يُفتح الدرج تلقائياً مع البيع النقدي فقط (ليس البطاقة أو الآجل).</div></div>
+      </div>
+      <div class="btns">
+        <button class="btn" data-a="test">طباعة تجريبية</button>
+        <button class="btn" data-a="drawer">فتح الدرج</button>
+      </div>
+      <div class="status"></div>
+    </div>
+  </section>
+</template>
+
+<script>
+const api = window.gustoSettings;
+let settings, systemPrinters = [], categories = [];
+const $ = (s, r = document) => r.querySelector(s);
+const setStatus = (el, text, kind) => { el.textContent = text; el.className = 'status' + (kind ? ' ' + kind : ''); };
+
+function readCard(card, p) {
+  card.querySelectorAll('[data-f]').forEach((el) => {
+    const f = el.dataset.f;
+    p[f] = el.type === 'checkbox' ? el.checked : ['port', 'paper', 'copies', 'drawerPin'].includes(f) ? Number(el.value) : el.value.trim();
+  });
+  p.categories = [...card.querySelectorAll('.cats input:checked')].map((i) => Number(i.value));
+  return p;
+}
+
+function refresh(card, p) {
+  card.querySelectorAll('[data-seg]').forEach((seg) => seg.querySelectorAll('button').forEach((b) => b.classList.toggle('on', p[seg.dataset.seg] === b.dataset.v)));
+  $('.net', card).style.display = p.connection === 'network' ? '' : 'none';
+  $('.usb', card).style.display = p.connection === 'usb' ? '' : 'none';
+  $('.ticket', card).style.display = p.role === 'ticket' ? '' : 'none';
+  $('.receipt', card).style.display = p.role === 'receipt' ? '' : 'none';
+  $('.drawer', card).style.display = p.openDrawer ? '' : 'none';
+  $('[data-a=drawer]', card).style.display = p.role === 'receipt' && p.openDrawer ? '' : 'none';
+  $('.body', card).classList.toggle('off', !p.enabled);
+}
+
+function render() {
+  const wrap = $('#printers'); wrap.innerHTML = '';
+  settings.printers.forEach((p) => {
+    const card = $('#printerTpl').content.firstElementChild.cloneNode(true);
+    const sel = $('[data-f=systemName]', card);
+    sel.innerHTML = '<option value="">— اختر —</option>' + systemPrinters.map((s) => `<option>${s.name.replace(/</g, '&lt;')}</option>`).join('');
+    if (p.systemName && !systemPrinters.some((s) => s.name === p.systemName)) sel.insertAdjacentHTML('beforeend', `<option>${p.systemName}</option>`);
+    card.querySelectorAll('[data-f]').forEach((el) => { const v = p[el.dataset.f]; el.type === 'checkbox' ? (el.checked = !!v) : (el.value = v ?? ''); });
+    const cats = $('.cats', card);
+    cats.innerHTML = categories.length
+      ? categories.map((c) => `<label><input type="checkbox" value="${c.idCategory}" ${p.categories.includes(c.idCategory) ? 'checked' : ''}> ${c.categoryName.replace(/</g, '&lt;')}</label>`).join('')
+      : '<span class="hint">اضبط عنوان الخادم أولاً لعرض الأصناف.</span>';
+    card.addEventListener('input', () => { readCard(card, p); refresh(card, p); });
+    card.querySelectorAll('[data-seg] button').forEach((b) => b.addEventListener('click', () => { p[b.parentElement.dataset.seg] = b.dataset.v; refresh(card, p); }));
+    const status = $('.status', card);
+    const run = async (btn, fn, okText) => {
+      btn.disabled = true; setStatus(status, 'جارٍ الإرسال…');
+      const r = await fn(readCard(card, p));
+      btn.disabled = false;
+      r.success ? setStatus(status, okText, 'ok') : setStatus(status, '✗ ' + r.error, 'err');
+    };
+    $('[data-a=test]', card).addEventListener('click', (e) => run(e.target, api.testPrinter, '✓ أُرسلت الصفحة التجريبية — تأكد أنها خرجت من الطابعة'));
+    $('[data-a=drawer]', card).addEventListener('click', (e) => run(e.target, api.openDrawer, '✓ أُرسل أمر فتح الدرج'));
+    refresh(card, p);
+    wrap.appendChild(card);
+  });
+}
+
+async function loadCategories() {
+  const url = $('#serverUrl').value.trim();
+  const r = url ? await api.categories(url) : { success: false };
+  categories = r.success ? r.data : [];
+}
+
+$('#checkServer').addEventListener('click', async () => {
+  const s = $('#serverStatus'); setStatus(s, 'جارٍ الفحص…');
+  const r = await api.checkServer($('#serverUrl').value.trim());
+  r.success ? setStatus(s, '✓ الخادم يعمل', 'ok') : setStatus(s, '✗ ' + r.error, 'err');
+  if (r.success) { document.querySelectorAll('.printer').forEach((c, i) => readCard(c, settings.printers[i])); await loadCategories(); render(); }
+});
+
+$('#save').addEventListener('click', async () => {
+  settings.serverUrl = $('#serverUrl').value.trim();
+  document.querySelectorAll('.printer').forEach((c, i) => readCard(c, settings.printers[i]));
+  const r = await api.save(settings);
+  r.success ? setStatus($('#saveStatus'), '✓ حُفظت الإعدادات' + (r.reloaded ? ' وأُعيد تحميل النظام' : ''), 'ok') : setStatus($('#saveStatus'), '✗ ' + r.error, 'err');
+});
+$('#close').addEventListener('click', () => api.close());
+
+(async () => {
+  settings = await api.load();
+  systemPrinters = await api.systemPrinters();
+  $('#serverUrl').value = settings.serverUrl || '';
+  await loadCategories();
+  render();
+})();
+</script>
+</body>
+</html>

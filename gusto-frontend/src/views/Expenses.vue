@@ -133,21 +133,21 @@
             <div class="d-flex ga-2">
               <v-tooltip text="رفع صورة" location="top">
                 <template v-slot:activator="{ props }">
-                  <v-btn v-bind="props" icon size="small" variant="text" @click="openPhotoUploadDialog(item)">
+                  <v-btn v-bind="props" icon size="small" variant="text" @click="openPhotoUploadDialog(item)" aria-label="رفع صورة الإيصال">
                     <PhCamera :size="18" weight="bold" color="#6B7280" />
                   </v-btn>
                 </template>
               </v-tooltip>
               <v-tooltip text="تعديل" location="top">
                 <template v-slot:activator="{ props }">
-                  <v-btn v-bind="props" icon size="small" variant="text" @click="editExpense(item)">
+                  <v-btn v-bind="props" icon size="small" variant="text" @click="editExpense(item)" aria-label="تعديل المصروف">
                     <PhPencilSimple :size="18" weight="bold" color="#046375" />
                   </v-btn>
                 </template>
               </v-tooltip>
               <v-tooltip text="حذف" location="top">
                 <template v-slot:activator="{ props }">
-                  <v-btn v-bind="props" icon size="small" variant="text" @click="deleteExpense(item)">
+                  <v-btn v-bind="props" icon size="small" variant="text" @click="deleteExpense(item)" aria-label="حذف المصروف">
                     <PhTrash :size="18" weight="bold" color="#EF4444" />
                   </v-btn>
                 </template>
@@ -214,7 +214,7 @@
                         style="border-radius: 12px"
                         @update:model-value="onExpenseCategorySelect"
                       />
-                      <v-btn variant="tonal" size="small" color="#046375" style="border-radius: 10px; min-width: 44px" @click="showAddCategoryDialog = true" icon>
+                      <v-btn variant="tonal" size="small" color="#046375" style="border-radius: 10px; min-width: 44px" @click="showAddCategoryDialog = true" icon aria-label="إضافة فئة مصروف" title="إضافة فئة مصروف">
                         <PhPlus :size="20" weight="bold" />
                       </v-btn>
                     </div>
@@ -387,7 +387,7 @@ import { useToast } from "vue-toastification";
 import AppLayout from "@/components/AppLayout.vue";
 import logoImg from "@/assets/logo.png";
 import { expenseAPI, expenseCategoryAPI, accountAPI, supplierAPI } from "@/services/api";
-import { formatDate, formatCurrentDateArabic } from "@/utils/dateFormatter";
+import { formatDate, formatCurrentDateArabic, todayBusinessDate, dateInputValue } from "@/utils/dateFormatter";
 import { PhPlus, PhReceipt, PhList, PhPencilSimple, PhTrash, PhCamera, PhX } from "@phosphor-icons/vue";
 
 const toast = useToast();
@@ -530,8 +530,8 @@ async function saveNewCategory() {
 }
 
 const filters = ref({
-  startDate: new Date().toISOString().split("T")[0],
-  endDate: new Date().toISOString().split("T")[0],
+  startDate: todayBusinessDate(),
+  endDate: todayBusinessDate(),
   category: null,
   supplierId: null,
 });
@@ -542,7 +542,7 @@ const stats = ref({
 });
 
 const expenseForm = ref({
-  expenseDate: new Date().toISOString().split("T")[0],
+  expenseDate: todayBusinessDate(),
   category: "",
   expenseCategoryId: null,
   paidFromAccountId: null,
@@ -614,9 +614,8 @@ const getImageUrl = (photoUrl) => {
   if (!photoUrl) return null;
   if (photoUrl.startsWith("http")) return photoUrl;
   // Images are served from backend at /uploads
-  // In development: http://localhost:3128 (proxy) or http://localhost:3000
-  // In production the API is served from the same origin as the app
-  const apiBase = import.meta.env.VITE_API_URL || (import.meta.env.MODE === "development" ? "http://localhost:3128" : window.location.origin);
+  // Same origin in development (Vite proxies /uploads) and production
+  const apiBase = import.meta.env.VITE_API_URL || window.location.origin;
   // Remove /api from base URL since /uploads is served directly
   const base = apiBase.replace("/api", "");
   return `${base}${photoUrl}`;
@@ -654,7 +653,7 @@ const loadExpenses = async () => {
     // Calculate total
     stats.value.totalExpenses = expenses.value.reduce((sum, e) => sum + parseFloat(e.amount || 0), 0);
   } catch (error) {
-    toast.error("فشل تحميل المصروفات");
+    toast.error(error.response?.data?.message || "فشل تحميل المصروفات");
     console.error(error);
   } finally {
     loading.value.expenses = false;
@@ -666,7 +665,7 @@ const openAddDialog = () => {
   editingExpense.value = null;
   const supplierId = route.query.supplierId ? Number(route.query.supplierId) : null;
   expenseForm.value = {
-    expenseDate: new Date().toISOString().split("T")[0],
+    expenseDate: todayBusinessDate(),
     category: "",
     expenseCategoryId: null,
     paidFromAccountId: null,
@@ -681,7 +680,7 @@ const openAddDialog = () => {
 const editExpense = (expense) => {
   editingExpense.value = expense;
   expenseForm.value = {
-    expenseDate: expense.expenseDate && String(expense.expenseDate).substring(0, 10) ? String(expense.expenseDate).substring(0, 10) : expense.expenseDate,
+    expenseDate: dateInputValue(expense.expenseDate),
     category: expense.category || "",
     expenseCategoryId: expense.expenseCategoryId ?? null,
     paidFromAccountId: expense.paidFromAccountId ?? null,
@@ -748,9 +747,7 @@ const openPhotoUploadDialog = (expense) => {
   // Use expense directly from table to preserve original date format (like editExpense does)
   selectedExpenseForPhoto.value = { ...expense };
   // Ensure expenseDate is in YYYY-MM-DD format (extract first 10 chars if needed)
-  if (selectedExpenseForPhoto.value.expenseDate && typeof selectedExpenseForPhoto.value.expenseDate === "string") {
-    selectedExpenseForPhoto.value.expenseDate = selectedExpenseForPhoto.value.expenseDate.substring(0, 10);
-  }
+  selectedExpenseForPhoto.value.expenseDate = dateInputValue(selectedExpenseForPhoto.value.expenseDate);
   // Set preview to existing photo if available
   if (expense.photoUrl) {
     imagePreview.value = getImageUrl(expense.photoUrl);
@@ -798,10 +795,7 @@ const savePhoto = async () => {
     const expenseId = selectedExpenseForPhoto.value.idExpense || selectedExpenseForPhoto.value.id;
     // Use the expenseDate as-is (should already be in YYYY-MM-DD format from openPhotoUploadDialog)
     // Just ensure it's a string and take first 10 chars if needed
-    let expenseDate = selectedExpenseForPhoto.value.expenseDate;
-    if (expenseDate && typeof expenseDate === "string" && expenseDate.length > 10) {
-      expenseDate = expenseDate.substring(0, 10);
-    }
+    const expenseDate = dateInputValue(selectedExpenseForPhoto.value.expenseDate);
 
     await expenseAPI.update(expenseId, {
       expenseDate: expenseDate,
@@ -818,7 +812,7 @@ const savePhoto = async () => {
     toast.success("تم إضافة الصورة بنجاح");
     skipPhoto();
   } catch (error) {
-    toast.error("فشل رفع الصورة");
+    toast.error(error.response?.data?.message || "فشل رفع الصورة");
     console.error("Error updating expense with photo:", error);
     console.error("Error response:", error.response?.data);
     console.error("Selected expense:", selectedExpenseForPhoto.value);
@@ -877,7 +871,7 @@ const deleteExpense = async (expense) => {
     toast.success("تم حذف المصروف بنجاح");
     loadExpenses();
   } catch (error) {
-    toast.error("فشل حذف المصروف");
+    toast.error(error.response?.data?.message || "فشل حذف المصروف");
     console.error(error);
   }
 };

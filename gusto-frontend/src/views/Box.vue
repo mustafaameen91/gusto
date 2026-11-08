@@ -62,61 +62,77 @@
         </v-col>
       </v-row>
 
-      <!-- Daily Balance Cards -->
+      <!-- Daily Balance Cards: for an open shift these are the drawer movements
+           (opening + cash sales + other cash income + customer cash − cash expenses − purchases = expected cash) -->
       <v-row class="mb-6">
-        <v-col cols="12" sm="6" lg="3">
-          <v-card elevation="0" style="background: var(--t-surface); border: 1px solid var(--t-border); border-radius: 12px;" class="pa-5">
+        <v-col cols="12" sm="6" lg="4">
+          <v-card elevation="0" style="background: var(--t-surface); border: 1px solid var(--t-border); border-radius: 12px;" class="pa-5 h-100">
             <div class="d-flex align-center justify-space-between mb-4">
-              <div style="width: 48px; height: 48px; border-radius: 10px; background: #3B82F6; display: flex; align-items: center; justify-content: center;">
+              <div style="width: 48px; height: 48px; border-radius: 10px; background: #046375; display: flex; align-items: center; justify-content: center;">
                 <PhWallet :size="24" weight="duotone" color="white" />
               </div>
             </div>
             <p class="text-body-2 mb-2" style="color: var(--t-text-dim); font-weight: 500;">رصيد الافتتاح</p>
-            <h2 class="text-h4 font-weight-bold mb-1" style="color: var(--t-text);">{{ Number(balance.openingCash || 0).toLocaleString() }} د.ع</h2>
+            <h2 class="text-h4 font-weight-bold mb-1" style="color: var(--t-text);">{{ fmt(balance.openingCash) }} د.ع</h2>
           </v-card>
         </v-col>
-        <v-col cols="12" sm="6" lg="3">
-          <v-card elevation="0" style="background: var(--t-surface); border: 1px solid var(--t-border); border-radius: 12px;" class="pa-5">
+        <v-col cols="12" sm="6" lg="4">
+          <v-card elevation="0" style="background: var(--t-surface); border: 1px solid var(--t-border); border-radius: 12px;" class="pa-5 h-100">
             <div class="d-flex align-center justify-space-between mb-4">
               <div style="width: 48px; height: 48px; border-radius: 10px; background: #10B981; display: flex; align-items: center; justify-content: center;">
                 <PhTrendUp :size="24" weight="duotone" color="white" />
               </div>
             </div>
-            <p class="text-body-2 mb-2" style="color: var(--t-text-dim); font-weight: 500;">إجمالي المبيعات</p>
-            <h2 class="text-h4 font-weight-bold mb-1" style="color: var(--t-text);">{{ Number(balance.totalSales || 0).toLocaleString() }} د.ع</h2>
+            <p class="text-body-2 mb-2" style="color: var(--t-text-dim); font-weight: 500;">{{ isLiveShift ? 'المبيعات النقدية' : 'إجمالي المبيعات' }}</p>
+            <h2 class="text-h4 font-weight-bold mb-1" style="color: var(--t-text);">{{ fmt(isLiveShift ? balance.cashSales : balance.totalSales) }} د.ع</h2>
+            <p v-if="isLiveShift" class="text-caption mb-0" style="color: var(--t-text-faint);">إجمالي المبيعات {{ fmt(balance.totalSales) }} · بطاقة {{ fmt(balance.cardSales) }} · آجل {{ fmt(balance.creditSales) }}</p>
           </v-card>
         </v-col>
-        <v-col cols="12" sm="6" lg="3">
-          <v-card elevation="0" style="background: var(--t-surface); border: 1px solid var(--t-border); border-radius: 12px;" class="pa-5">
+        <v-col cols="12" sm="6" lg="4">
+          <v-card elevation="0" style="background: var(--t-surface); border: 1px solid var(--t-border); border-radius: 12px;" class="pa-5 h-100">
             <div class="d-flex align-center justify-space-between mb-4">
               <div style="width: 48px; height: 48px; border-radius: 10px; background: #059669; display: flex; align-items: center; justify-content: center;">
                 <PhCoins :size="24" weight="duotone" color="white" />
               </div>
             </div>
-            <p class="text-body-2 mb-2" style="color: var(--t-text-dim); font-weight: 500;">إيرادات خارجية</p>
-            <h2 class="text-h4 font-weight-bold mb-1" style="color: var(--t-text);">{{ Number(balance.totalOtherIncomes || 0).toLocaleString() }} د.ع</h2>
+            <p class="text-body-2 mb-2" style="color: var(--t-text-dim); font-weight: 500;">{{ isLiveShift ? 'إيرادات خارجية نقدية' : 'إيرادات خارجية' }}</p>
+            <h2 class="text-h4 font-weight-bold mb-1" style="color: var(--t-text);">{{ fmt(isLiveShift ? balance.otherIncomesCash : balance.totalOtherIncomes) }} د.ع</h2>
+            <p v-if="isLiveShift" class="text-caption mb-0" style="color: var(--t-text-faint);">إجمالي الإيرادات الخارجية {{ fmt(balance.totalOtherIncomes) }}</p>
           </v-card>
         </v-col>
-        <v-col cols="12" sm="6" lg="3">
-          <v-card elevation="0" style="background: var(--t-surface); border: 1px solid var(--t-border); border-radius: 12px;" class="pa-5">
+        <v-col v-if="isLiveShift" cols="12" sm="6" lg="4">
+          <v-card elevation="0" style="background: var(--t-surface); border: 1px solid var(--t-border); border-radius: 12px;" class="pa-5 h-100">
+            <div class="d-flex align-center justify-space-between mb-4">
+              <div style="width: 48px; height: 48px; border-radius: 10px; background: #D4A574; display: flex; align-items: center; justify-content: center;">
+                <PhHandCoins :size="24" weight="duotone" color="white" />
+              </div>
+            </div>
+            <p class="text-body-2 mb-2" style="color: var(--t-text-dim); font-weight: 500;">مقبوضات العملاء والبقشيش</p>
+            <h2 class="text-h4 font-weight-bold mb-1" style="color: var(--t-text);">{{ fmt(balance.customerCash) }} د.ع</h2>
+            <p class="text-caption mb-0" style="color: var(--t-text-faint);">تسديدات العملاء + البقشيش − المرتجعات النقدية</p>
+          </v-card>
+        </v-col>
+        <v-col cols="12" sm="6" lg="4">
+          <v-card elevation="0" style="background: var(--t-surface); border: 1px solid var(--t-border); border-radius: 12px;" class="pa-5 h-100">
             <div class="d-flex align-center justify-space-between mb-4">
               <div style="width: 48px; height: 48px; border-radius: 10px; background: #EF4444; display: flex; align-items: center; justify-content: center;">
                 <PhTrendDown :size="24" weight="duotone" color="white" />
               </div>
             </div>
-            <p class="text-body-2 mb-2" style="color: var(--t-text-dim); font-weight: 500;">إجمالي المصروفات</p>
-            <h2 class="text-h4 font-weight-bold mb-1" style="color: var(--t-text);">{{ Number(balance.totalExpenses || 0).toLocaleString() }} د.ع</h2>
+            <p class="text-body-2 mb-2" style="color: var(--t-text-dim); font-weight: 500;">{{ isLiveShift ? 'مصروفات من الصندوق' : 'إجمالي المصروفات' }}</p>
+            <h2 class="text-h4 font-weight-bold mb-1" style="color: var(--t-text);">{{ fmt(isLiveShift ? balance.cashExpenses : balance.totalExpenses) }} د.ع</h2>
+            <p v-if="isLiveShift" class="text-caption mb-0" style="color: var(--t-text-faint);">إجمالي المصروفات {{ fmt(balance.totalExpenses) }}</p>
           </v-card>
         </v-col>
-        <v-col cols="12" sm="6" lg="3">
-          <v-card elevation="0" style="background: var(--t-surface); border: 1px solid var(--t-border); border-radius: 12px;" class="pa-5">
+        <v-col cols="12" sm="6" lg="4">
+          <v-card elevation="0" style="background: var(--t-surface); border: 1px solid var(--t-border); border-radius: 12px;" class="pa-5 h-100">
             <div class="d-flex align-center justify-space-between mb-4">
               <div style="width: 48px; height: 48px; border-radius: 10px; background: #F59E0B; display: flex; align-items: center; justify-content: center;">
                 <PhShoppingCart :size="24" weight="duotone" color="white" />
               </div>
             </div>
-            <p class="text-body-2 mb-2" style="color: var(--t-text-dim); font-weight: 500;">إجمالي المشتريات</p>
-            <h2 class="text-h4 font-weight-bold mb-1" style="color: var(--t-text);">{{ Number(balance.totalPurchases || 0).toLocaleString() }} د.ع</h2>
+            <p class="text-body-2 mb-2" style="color: var(--t-text-dim); font-weight: 500;">{{ isLiveShift ? 'مشتريات من الصندوق' : 'إجمالي المشتريات' }}</p>
+            <h2 class="text-h4 font-weight-bold mb-1" style="color: var(--t-text);">{{ fmt(balance.totalPurchases) }} د.ع</h2>
           </v-card>
         </v-col>
       </v-row>
@@ -126,13 +142,13 @@
         <v-col cols="12">
           <v-card
             elevation="0"
-            :style="balance.isOpen ? 'background: linear-gradient(135deg, #3B82F6 0%, #2563EB 100%); border-radius: 12px;' : 'background: linear-gradient(135deg, #9CA3AF 0%, #6B7280 100%); border-radius: 12px;'"
+            :style="balance.isOpen ? 'background: linear-gradient(135deg, #046375 0%, #1F7F90 100%); border-radius: 12px;' : 'background: linear-gradient(135deg, #9CA3AF 0%, #6B7280 100%); border-radius: 12px;'"
             class="pa-6"
           >
             <div class="d-flex align-center justify-space-between flex-wrap">
               <div>
                 <p class="text-body-1 mb-2 text-white" style="opacity: 0.9;">
-                  {{ balance.isOpen ? 'الرصيد الحالي للصندوق' : 'رصيد إغلاق الصندوق' }}
+                  {{ balance.isOpen ? 'الرصيد الحالي للصندوق (النقد المتوقع في الدرج)' : 'رصيد إغلاق الصندوق' }}
                 </p>
                 <h1 class="text-h3 font-weight-bold text-white mb-0">
                   {{ Number(balance.currentBalance || balance.closingCash || 0).toLocaleString() }} د.ع
@@ -159,7 +175,7 @@
             </h2>
             <div class="d-flex ga-2">
               <v-btn
-                v-if="hasRole(['admin', 'cashier'])"
+                v-if="isAdmin"
                 color="#046375"
                 variant="flat"
                 size="small"
@@ -368,7 +384,7 @@
       </v-card>
 
       <!-- Transfer between boxes dialog -->
-      <v-dialog v-model="showTransferDialog" max-width="440" persistent>
+      <v-dialog v-if="isAdmin" v-model="showTransferDialog" max-width="440" persistent>
         <v-card>
           <v-card-title class="pa-4" style="border-bottom: 1px solid var(--t-border);">
             تحويل بين الصناديق
@@ -436,7 +452,7 @@ import { useRoute } from 'vue-router'
 import AppLayout from '@/components/AppLayout.vue'
 import logoImg from '@/assets/logo.png'
 import { boxAPI, accountAPI } from '@/services/api'
-import { formatDate, formatCurrentDateArabic } from '@/utils/dateFormatter'
+import { formatDate, formatCurrentDateArabic, todayBusinessDate, addDaysYMD, toYMD } from '@/utils/dateFormatter'
 import {
   PhWallet, PhTrendUp, PhTrendDown, PhShoppingCart,
   PhLockKeyOpen, PhLockKey, PhBank, PhArrowsClockwise,
@@ -462,6 +478,11 @@ const balance = ref({
 })
 
 const hasRole = (roles) => roles.includes(authStore.user?.role)
+// POST /box/transfer and GET /accounts are admin-only on the server
+const isAdmin = computed(() => authStore.user?.role === 'admin')
+// Open shift: the API returns the drawer breakdown (cashSales, cashExpenses, customerCash …)
+const isLiveShift = computed(() => !!balance.value.isOpen && balance.value.cashSales !== undefined)
+const fmt = (v) => Number(v || 0).toLocaleString()
 
 const transactions = ref([])
 const quickRange = ref('today')
@@ -487,8 +508,8 @@ const transferForm = ref({
 const transferErrors = ref({ amount: '' })
 
 const filters = ref({
-  startDate: new Date().toISOString().split('T')[0],
-  endDate: new Date().toISOString().split('T')[0]
+  startDate: todayBusinessDate(),
+  endDate: todayBusinessDate()
 })
 
 const headers = [
@@ -533,23 +554,20 @@ const getAccountTypeIcon = (type) => {
 }
 
 watch(quickRange, (newRange) => {
-  const today = new Date()
-  filters.value.endDate = today.toISOString().split('T')[0]
+  const today = todayBusinessDate()
+  filters.value.endDate = today
   
   switch(newRange) {
     case 'today':
-      filters.value.startDate = filters.value.endDate
+      filters.value.startDate = today
       break
-    case 'week': {
-      const weekAgo = new Date(today)
-      weekAgo.setDate(today.getDate() - 7)
-      filters.value.startDate = weekAgo.toISOString().split('T')[0]
+    case 'week': // last 7 days including today
+      filters.value.startDate = addDaysYMD(today, -6)
       break
-    }
     case 'month': {
-      const monthAgo = new Date(today)
-      monthAgo.setMonth(today.getMonth() - 1)
-      filters.value.startDate = monthAgo.toISOString().split('T')[0]
+      const [y, m, d] = today.split('-').map(Number)
+      const monthAgo = new Date(y, m - 2, d)
+      filters.value.startDate = toYMD(monthAgo)
       break
     }
   }
@@ -573,7 +591,7 @@ const loadBalance = async () => {
     const response = await boxAPI.getBalance()
     balance.value = response.data || {}
   } catch (error) {
-    toast.error('فشل تحميل رصيد الصندوق')
+    toast.error(error.response?.data?.message || 'فشل تحميل رصيد الصندوق')
     console.error(error)
   } finally {
     loading.value.balance = false
@@ -589,7 +607,7 @@ const loadTransactions = async () => {
     })
     transactions.value = response.data || []
   } catch (error) {
-    toast.error('فشل تحميل المعاملات')
+    toast.error(error.response?.data?.message || 'فشل تحميل المعاملات')
     console.error(error)
   } finally {
     loading.value.transactions = false
@@ -602,7 +620,7 @@ const loadAccountBalances = async () => {
     const response = await boxAPI.getAccountBalances()
     accountBalances.value = (response.data || []).filter(a => a.transactionCount > 0 || a.balance !== 0)
   } catch (error) {
-    toast.error('فشل تحميل أرصدة الحسابات')
+    toast.error(error.response?.data?.message || 'فشل تحميل أرصدة الحسابات')
     console.error(error)
   } finally {
     loading.value.accountBalances = false
@@ -622,7 +640,7 @@ const toggleAccountDetail = async (accountId) => {
     const response = await boxAPI.getAccountTransactions(accountId)
     accountTxns.value = (response.data || []).slice(0, 50)
   } catch (error) {
-    toast.error('فشل تحميل معاملات الحساب')
+    toast.error(error.response?.data?.message || 'فشل تحميل معاملات الحساب')
     console.error(error)
   } finally {
     loading.value.accountTxns = false

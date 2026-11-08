@@ -14,6 +14,7 @@
           <div class="header-text">
             <h1 class="header-title">شاشة المطبخ</h1>
             <p class="header-subtitle">{{ authStore.user?.fullName }} · {{ currentDate }} · {{ currentTime }}</p>
+            <p v-if="!socketConnected" class="header-offline" role="status">الاتصال المباشر منقطع — يتم تحديث الطلبات تلقائياً كل 30 ثانية</p>
           </div>
         </div>
       </header>
@@ -60,9 +61,10 @@
                       <span class="order-item-name">{{ item.itemName }}</span>
                       <span class="order-item-qty">×{{ item.quantity }}</span>
                       <span v-if="item.sizeName" class="order-item-size">الحجم: {{ item.sizeName }}</span>
-                      <span v-if="item.specialInstructions" class="order-item-notes">📝 {{ item.specialInstructions }}</span>
+                      <span v-if="hasNote(item.specialInstructions)" class="order-item-notes">📝 {{ item.specialInstructions }}</span>
                     </li>
                   </ul>
+                  <p v-if="hasNote(order.notes)" class="order-notes">📝 ملاحظات الطلب: {{ order.notes }}</p>
                 </div>
                 <div class="order-card-actions">
                   <v-btn
@@ -124,9 +126,10 @@
                       <span class="order-item-name">{{ item.itemName }}</span>
                       <span class="order-item-qty">×{{ item.quantity }}</span>
                       <span v-if="item.sizeName" class="order-item-size">الحجم: {{ item.sizeName }}</span>
-                      <span v-if="item.specialInstructions" class="order-item-notes">📝 {{ item.specialInstructions }}</span>
+                      <span v-if="hasNote(item.specialInstructions)" class="order-item-notes">📝 {{ item.specialInstructions }}</span>
                     </li>
                   </ul>
+                  <p v-if="hasNote(order.notes)" class="order-notes">📝 ملاحظات الطلب: {{ order.notes }}</p>
                 </div>
                 <div class="order-card-actions">
                   <v-btn
@@ -170,6 +173,14 @@ const toast = useToast()
 const orders = ref([])
 const currentTime = ref(format(new Date(), 'HH:mm:ss'))
 const loading = ref({ orders: false })
+const socketConnected = ref(true)
+
+// Old orders were saved with placeholder notes — don't show those
+const PLACEHOLDER_NOTES = ['لاتوجد', 'لا توجد', 'بدون ملاحظات']
+const hasNote = (note) => {
+  const text = (note ?? '').toString().trim()
+  return text !== '' && !PLACEHOLDER_NOTES.includes(text)
+}
 
 const currentDate = computed(() => formatCurrentDateArabic())
 
@@ -222,7 +233,8 @@ const readyOrders = computed(() => {
 })
 
 const loadActiveOrders = async () => {
-  loading.value.orders = true
+  // Skeleton only on the first load; later refreshes keep the cards on screen
+  if (!orders.value.length) loading.value.orders = true
   try {
     const res = await orderAPI.getActive()
     orders.value = res.data || []
@@ -268,18 +280,41 @@ const getOrderTime = (dateString) => {
 }
 
 let timeInterval
+let pollInterval = null
 let socket = null
+
+// While the live connection is down, fall back to polling so the screen stays current
+const startPolling = () => {
+  if (!pollInterval) pollInterval = setInterval(loadActiveOrders, 30000)
+}
+const stopPolling = () => {
+  if (pollInterval) clearInterval(pollInterval)
+  pollInterval = null
+}
 
 onMounted(() => {
   loadActiveOrders()
   timeInterval = setInterval(() => {
     currentTime.value = format(new Date(), 'HH:mm:ss')
   }, 1000)
-  const socketUrl = import.meta.env.VITE_API_URL || (import.meta.env.DEV ? 'http://localhost:3128' : window.location.origin)
+  const socketUrl = import.meta.env.VITE_API_URL || window.location.origin // dev: proxied by Vite
   socket = io(socketUrl, { transports: ['websocket', 'polling'], auth: { token: localStorage.getItem('gusto_token') } })
-  socket.on('connect', () => socket.emit('join_kitchen'))
+  socket.on('connect', () => {
+    socketConnected.value = true
+    stopPolling()
+    socket.emit('join_kitchen')
+    loadActiveOrders()
+  })
+  socket.on('disconnect', () => {
+    socketConnected.value = false
+    startPolling()
+  })
+  socket.on('connect_error', () => {
+    socketConnected.value = false
+    startPolling()
+  })
   socket.on('new_order', (data) => {
-    toast.info(`طلب جديد #${data.orderNumber}`)
+    toast.info(`طلب جديد #${data?.orderNumber ?? ''}`)
     loadActiveOrders()
   })
   socket.on('order_updated', () => loadActiveOrders())
@@ -289,6 +324,7 @@ onMounted(() => {
 
 onUnmounted(() => {
   clearInterval(timeInterval)
+  stopPolling()
   if (socket) socket.disconnect()
 })
 </script>
@@ -508,6 +544,13 @@ onUnmounted(() => {
   padding: 1rem 1.25rem;
 }
 
+.header-offline {
+  margin: 0.25rem 0 0;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #D4A574;
+}
+
 .order-source {
   margin: 0 0 0.75rem;
   font-size: 0.8rem;
@@ -562,6 +605,17 @@ onUnmounted(() => {
   font-size: 0.8rem;
   color: #f87171;
   font-weight: 500;
+}
+
+.order-notes {
+  margin: 0.75rem 0 0;
+  padding: 0.5rem 0.75rem;
+  border-radius: 8px;
+  border: 1px dashed var(--t-border-soft);
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--t-text);
+  white-space: pre-wrap;
 }
 
 .order-card-actions {

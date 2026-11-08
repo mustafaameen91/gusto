@@ -30,6 +30,10 @@
           إضافة للعرض في المطبخ
         </v-card-title>
         <v-card-text class="pa-5">
+          <v-alert type="info" variant="tonal" density="compact" class="mb-4">
+            الأطباق غير المضافة هنا تُحضَّر حسب الطلب وتبقى متاحة للبيع دائماً.
+            أما الأطباق المضافة هنا فيُحدَّد بيعها بعدد الحصص الجاهزة، وعند وصولها إلى صفر يتوقف بيعها حتى تضيف كمية جديدة.
+          </v-alert>
           <v-row align="center">
             <v-col cols="12" md="5">
               <v-autocomplete
@@ -172,7 +176,7 @@
 
 <script setup>
 import { ref, onMounted } from 'vue'
-import { kitchenStockAPI, menuAPI } from '@/services/api'
+import { kitchenStockAPI, menuAPI, categoryAPI } from '@/services/api'
 import { useToast } from 'vue-toastification'
 import { formatCurrentDateArabic } from '@/utils/dateFormatter'
 import logoImg from '@/assets/logo.png'
@@ -196,8 +200,14 @@ const savingSet = ref(false)
 async function loadMenuItems() {
   loading.value.menu = true
   try {
-    const res = await menuAPI.getAll()
-    kitchenMenuItems.value = Array.isArray(res.data) ? res.data : []
+    // /menu doesn't return isKitchen, so match items against the kitchen categories
+    const [menuRes, catRes] = await Promise.all([menuAPI.getAll(), categoryAPI.getAll()])
+    const items = Array.isArray(menuRes.data) ? menuRes.data : []
+    const cats = Array.isArray(catRes.data) ? catRes.data : []
+    const kitchenCatIds = new Set(
+      cats.filter(c => c.isKitchen === 1 || c.isKitchen === true || c.isKitchen === '1').map(c => c.idCategory)
+    )
+    kitchenMenuItems.value = items.filter(item => kitchenCatIds.has(item.categoryId))
   } catch (e) {
     kitchenMenuItems.value = []
     toast.error('فشل تحميل القائمة')
@@ -263,7 +273,7 @@ async function submitSetQuantity() {
 }
 
 async function removeFromKitchen(row) {
-  if (!confirm(`إزالة "${row.itemName}" من عرض المطبخ؟ (تصفير الكمية)`)) return
+  if (!confirm(`تصفير كمية "${row.itemName}"؟ سيتوقف بيعه في الكاشير حتى تضيف كمية جديدة.`)) return
   savingSet.value = true
   try {
     await kitchenStockAPI.setQuantity({ menuItemId: row.menuItemId, quantity: 0 })

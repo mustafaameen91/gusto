@@ -138,8 +138,8 @@
             <v-chip
               v-if="item.orderNumber"
               size="small"
-              color="#3B82F6"
-              variant="flat"
+              color="primary"
+              variant="tonal"
             >
               {{ item.orderNumber }}
             </v-chip>
@@ -151,7 +151,9 @@
               variant="text"
               size="small"
               @click="editTip(item)"
-              color="#3B82F6"
+              color="primary"
+              aria-label="تعديل البقشيش"
+              title="تعديل البقشيش"
             >
               <PhPencilSimple :size="18" weight="bold" />
             </v-btn>
@@ -162,6 +164,8 @@
               size="small"
               @click="deleteTip(item)"
               color="#EF4444"
+              aria-label="حذف البقشيش"
+              title="حذف البقشيش"
             >
               <PhTrash :size="18" weight="bold" />
             </v-btn>
@@ -246,7 +250,7 @@ import { useToast } from 'vue-toastification'
 import AppLayout from '@/components/AppLayout.vue'
 import logoImg from '@/assets/logo.png'
 import { tipAPI } from '@/services/api'
-import { formatDate, formatCurrentDateArabic } from '@/utils/dateFormatter'
+import { formatDate, formatCurrentDateArabic, todayBusinessDate, dateInputValue } from '@/utils/dateFormatter'
 import { PhPlus, PhCurrencyDollar, PhList, PhPencilSimple, PhTrash } from '@phosphor-icons/vue'
 
 const toast = useToast()
@@ -267,8 +271,8 @@ const formRef = ref(null)
 const valid = ref(false)
 
 const filters = ref({
-  startDate: new Date().toISOString().split('T')[0],
-  endDate: new Date().toISOString().split('T')[0]
+  startDate: todayBusinessDate(),
+  endDate: todayBusinessDate()
 })
 
 const stats = ref({
@@ -276,7 +280,7 @@ const stats = ref({
 })
 
 const tipForm = ref({
-  tipDate: new Date().toISOString().split('T')[0],
+  tipDate: todayBusinessDate(),
   amount: 0,
   orderId: null
 })
@@ -307,7 +311,7 @@ const loadTips = async () => {
     // Calculate total
     stats.value.totalTips = tips.value.reduce((sum, t) => sum + parseFloat(t.amount || 0), 0)
   } catch (error) {
-    toast.error('فشل تحميل البقشيش')
+    toast.error(error.response?.data?.message || 'فشل تحميل البقشيش')
     console.error(error)
   } finally {
     loading.value.tips = false
@@ -317,7 +321,7 @@ const loadTips = async () => {
 const openAddDialog = () => {
   editingTip.value = null
   tipForm.value = {
-    tipDate: new Date().toISOString().split('T')[0],
+    tipDate: todayBusinessDate(),
     amount: 0,
     orderId: null
   }
@@ -327,7 +331,7 @@ const openAddDialog = () => {
 const editTip = (tip) => {
   editingTip.value = tip
   tipForm.value = {
-    tipDate: tip.tipDate,
+    tipDate: dateInputValue(tip.tipDate),
     amount: tip.amount,
     orderId: tip.orderId || null
   }
@@ -361,7 +365,7 @@ const saveTip = async () => {
     closeDialog()
     loadTips()
   } catch (error) {
-    toast.error(editingTip.value ? 'فشل تحديث البقشيش' : 'فشل إضافة البقشيش')
+    toast.error(error.response?.data?.message || (editingTip.value ? 'فشل تحديث البقشيش' : 'فشل إضافة البقشيش'))
     console.error(error)
   }
 }
@@ -374,7 +378,7 @@ const deleteTip = async (tip) => {
     toast.success('تم حذف البقشيش بنجاح')
     loadTips()
   } catch (error) {
-    toast.error('فشل حذف البقشيش')
+    toast.error(error.response?.data?.message || 'فشل حذف البقشيش')
     console.error(error)
   }
 }

@@ -5,10 +5,9 @@ const getApiBaseURL = () => {
   if (import.meta.env.VITE_API_URL) {
     return import.meta.env.VITE_API_URL;
   }
-  if (import.meta.env.MODE === "development" || import.meta.env.DEV) {
-    return "http://localhost:3128/api";
-  }
-  // In production, use relative URL so the frontend works on any domain
+  // Same origin everywhere: in development the Vite server proxies /api, /uploads and
+  // /socket.io to the backend (vite.config.js), so any dev port and any device on the
+  // network works without CORS; in production the backend serves the app itself.
   return "/api";
 };
 

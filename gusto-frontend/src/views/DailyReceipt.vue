@@ -161,9 +161,9 @@
                 </v-col>
                 <v-col cols="12" sm="6" md="3">
                   <div class="mb-2">
-                    <p class="text-body-2 mb-1" style="color: var(--t-text-dim); font-weight: 500;">المصروفات</p>
+                    <p class="text-body-2 mb-1" style="color: var(--t-text-dim); font-weight: 500;">مصروفات من الصندوق</p>
                     <h3 class="text-h5 font-weight-bold mb-0" style="color: #DC2626;">
-                      -{{ Number(currentReceipt.totalExpenses || 0).toLocaleString() }} د.ع
+                      -{{ Number(currentReceipt.cashExpenses ?? currentReceipt.totalExpenses ?? 0).toLocaleString() }} د.ع
                     </h3>
                   </div>
                   </v-col>
@@ -171,7 +171,7 @@
                   <div class="mb-2">
                     <p class="text-body-2 mb-1" style="color: var(--t-text-dim); font-weight: 500;">إيرادات خارجية</p>
                     <h3 class="text-h5 font-weight-bold mb-0" style="color: #059669;">
-                      +{{ Number(currentReceipt.totalOtherIncomes || 0).toLocaleString() }} د.ع
+                      +{{ Number(currentReceipt.otherIncomesCash ?? 0).toLocaleString() }} د.ع
                     </h3>
                   </div>
                   </v-col>
@@ -179,7 +179,7 @@
                   <div class="mb-2">
                     <p class="text-body-2 mb-1" style="color: var(--t-text-dim); font-weight: 500;">الرصيد المتوقع</p>
                     <h3 class="text-h5 font-weight-bold mb-0" style="color: #046375;">
-                      {{ Number(currentReceipt.expectedCash ?? (currentReceipt.openingCash + (currentReceipt.cashSales ?? currentReceipt.totalSales) - currentReceipt.totalExpenses + (currentReceipt.otherIncomesCash || 0))).toLocaleString() }} د.ع
+                      {{ Number(expectedBalance).toLocaleString() }} د.ع
                     </h3>
                   </div>
                 </v-col>
@@ -462,16 +462,24 @@
                 <strong class="close-summary-value" style="color: #2563EB;">{{ Number(currentReceipt?.cardSales ?? 0).toLocaleString() }} د.ع</strong>
               </div>
               <div class="close-summary-row">
-                <span class="close-summary-label">مبيعات آجل</span>
-                <strong class="close-summary-value" style="color: #0D9488;">+{{ Number(currentReceipt?.creditSales ?? 0).toLocaleString() }} د.ع</strong>
+                <span class="close-summary-label">مبيعات آجل (لا تدخل الصندوق)</span>
+                <strong class="close-summary-value" style="color: #0D9488;">{{ Number(currentReceipt?.creditSales ?? 0).toLocaleString() }} د.ع</strong>
               </div>
               <div class="close-summary-row">
-                <span class="close-summary-label">المصروفات</span>
-                <strong class="close-summary-value" style="color: #DC2626;">-{{ Number(currentReceipt?.totalExpenses || 0).toLocaleString() }} د.ع</strong>
+                <span class="close-summary-label">مصروفات من الصندوق</span>
+                <strong class="close-summary-value" style="color: #DC2626;">-{{ Number(currentReceipt?.cashExpenses ?? currentReceipt?.totalExpenses ?? 0).toLocaleString() }} د.ع</strong>
               </div>
               <div class="close-summary-row">
-                <span class="close-summary-label">إيرادات خارجية</span>
-                <strong class="close-summary-value" style="color: #059669;">+{{ Number(currentReceipt?.otherIncomesCash ?? currentReceipt?.totalOtherIncomes ?? 0).toLocaleString() }} د.ع</strong>
+                <span class="close-summary-label">إيرادات خارجية نقدية</span>
+                <strong class="close-summary-value" style="color: #059669;">+{{ Number(currentReceipt?.otherIncomesCash ?? 0).toLocaleString() }} د.ع</strong>
+              </div>
+              <div class="close-summary-row">
+                <span class="close-summary-label">تحصيلات العملاء والإكراميات − المرتجعات النقدية</span>
+                <strong class="close-summary-value" :style="{ color: (currentReceipt?.customerCash ?? 0) >= 0 ? '#059669' : '#DC2626' }">{{ (currentReceipt?.customerCash ?? 0) >= 0 ? '+' : '' }}{{ Number(currentReceipt?.customerCash ?? 0).toLocaleString() }} د.ع</strong>
+              </div>
+              <div class="close-summary-row">
+                <span class="close-summary-label">مشتريات نقدية من الصندوق</span>
+                <strong class="close-summary-value" style="color: #DC2626;">-{{ Number(currentReceipt?.cashPurchases ?? 0).toLocaleString() }} د.ع</strong>
               </div>
               <v-divider class="my-3" />
               <div class="close-summary-row">
@@ -606,16 +614,24 @@
                 <strong style="color: #2563EB;">{{ Number(lastCloseSummary?.cardSales ?? 0).toLocaleString() }} د.ع</strong>
               </div>
               <div class="print-summary-row">
-                <span>مبيعات آجل</span>
-                <strong style="color: #0D9488;">+{{ Number(lastCloseSummary?.creditSales ?? 0).toLocaleString() }} د.ع</strong>
+                <span>مبيعات آجل (لا تدخل الصندوق)</span>
+                <strong style="color: #0D9488;">{{ Number(lastCloseSummary?.creditSales ?? 0).toLocaleString() }} د.ع</strong>
               </div>
               <div class="print-summary-row">
-                <span>المصروفات</span>
-                <strong style="color: #DC2626;">-{{ Number(lastCloseSummary?.totalExpenses ?? 0).toLocaleString() }} د.ع</strong>
+                <span>مصروفات من الصندوق</span>
+                <strong style="color: #DC2626;">-{{ Number(lastCloseSummary?.cashExpenses ?? lastCloseSummary?.totalExpenses ?? 0).toLocaleString() }} د.ع</strong>
               </div>
               <div class="print-summary-row">
-                <span>إيرادات خارجية</span>
-                <strong style="color: #059669;">+{{ Number(lastCloseSummary?.totalOtherIncomes ?? 0).toLocaleString() }} د.ع</strong>
+                <span>إيرادات خارجية نقدية</span>
+                <strong style="color: #059669;">+{{ Number(lastCloseSummary?.otherIncomesCash ?? 0).toLocaleString() }} د.ع</strong>
+              </div>
+              <div class="print-summary-row">
+                <span>تحصيلات العملاء والإكراميات − المرتجعات النقدية</span>
+                <strong>{{ Number(lastCloseSummary?.customerCash ?? 0).toLocaleString() }} د.ع</strong>
+              </div>
+              <div class="print-summary-row">
+                <span>مشتريات نقدية من الصندوق</span>
+                <strong style="color: #DC2626;">-{{ Number(lastCloseSummary?.cashPurchases ?? 0).toLocaleString() }} د.ع</strong>
               </div>
               <v-divider class="my-3" />
               <div class="print-summary-row">
@@ -859,15 +875,8 @@ const receiptHeaders = [
   { title: 'إجراءات', key: 'actions', sortable: false }
 ]
 
-const expectedBalance = computed(() => {
-  if (!currentReceipt.value) return 0
-  if (currentReceipt.value.expectedCash != null) return Number(currentReceipt.value.expectedCash)
-  const openingCash = parseFloat(currentReceipt.value.openingCash || 0)
-  const cashSales = parseFloat((currentReceipt.value.cashSales ?? currentReceipt.value.totalSales) || 0)
-  const totalExpenses = parseFloat(currentReceipt.value.totalExpenses || 0)
-  const otherIncomesCash = parseFloat(currentReceipt.value.otherIncomesCash || 0)
-  return openingCash + cashSales - totalExpenses + otherIncomesCash
-})
+// The server's figure (same calculation the shift close and the cash box use)
+const expectedBalance = computed(() => Number(currentReceipt.value?.expectedCash ?? 0))
 
 // Header action methods
 const exportToExcel = () => {
@@ -950,11 +959,9 @@ const loadPreviousReceipts = async () => {
 const loadTodayTransactions = async () => {
   loading.value.transactions = true
   try {
-    const today = new Date().toISOString().split('T')[0]
-    const response = await orderAPI.getAll({
-      startDate: today,
-      endDate: today
-    })
+    const shiftOfOrders = currentReceipt.value?.idDailyReceipt ?? currentReceipt.value?.id
+    if (!shiftOfOrders) { todayTransactions.value = []; return }
+    const response = await orderAPI.getAll({ dailyReceiptId: shiftOfOrders, limit: 500 })
 
     let ordersData = []
     if (Array.isArray(response.data)) {
@@ -965,7 +972,7 @@ const loadTodayTransactions = async () => {
       ordersData = response
     }
 
-    const saleRows = ordersData.map(order => ({
+    const saleRows = ordersData.filter(order => order.status !== 'cancelled').map(order => ({
       type: 'sale',
       description: `طلب #${order.orderNumber}`,
       amount: order.totalPrice || order.totalAmount,

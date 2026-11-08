@@ -142,6 +142,7 @@
                         variant="text"
                         color="primary"
                         @click="viewPurchase(item)"
+                        aria-label="عرض التفاصيل"
                       >
                         <PhEye :size="20" weight="bold" />
                       </v-btn>
@@ -161,6 +162,7 @@
                         variant="text"
                         color="success"
                         @click="openReceiveDialog(item)"
+                        aria-label="استلام"
                       >
                         <PhCheckCircle :size="20" weight="bold" />
                       </v-btn>
@@ -176,6 +178,7 @@
                         variant="text"
                         color="secondary"
                         @click="printPurchase(item)"
+                        aria-label="طباعة"
                       >
                         <PhPrinter :size="20" weight="bold" />
                       </v-btn>
@@ -400,6 +403,7 @@
                     color="error"
                     variant="text"
                     @click="removeItem(index)"
+                    aria-label="حذف الصنف"
                   >
                     <PhTrash :size="20" weight="bold" />
                   </v-btn>
@@ -683,7 +687,7 @@ import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useToast } from 'vue-toastification'
 import { useAuthStore } from '@/stores/auth'
-import { formatCurrentDateArabic } from '@/utils/dateFormatter'
+import { formatCurrentDateArabic, todayBusinessDate } from '@/utils/dateFormatter'
 import { purchaseAPI, inventoryAPI, supplierAPI } from '@/services/api'
 import logoImg from '@/assets/logo.png'
 import AppLayout from '@/components/AppLayout.vue'
@@ -728,7 +732,7 @@ const purchaseForm = ref({
   supplierId: null,
   supplierName: '',
   supplierPhone: '',
-  purchaseDate: new Date().toISOString().split('T')[0],
+  purchaseDate: todayBusinessDate(),
   expectedDeliveryDate: '',
   totalAmount: 0,
   paymentType: 'credit',
@@ -816,7 +820,7 @@ const openCreateDialog = async () => {
     purchaseForm.value = {
       purchaseNumber: response.data.purchaseNumber,
       supplierId: null,
-      purchaseDate: new Date().toISOString().split('T')[0],
+      purchaseDate: todayBusinessDate(),
       expectedDeliveryDate: '',
       totalAmount: 0,
       paymentType: 'credit',
@@ -874,7 +878,7 @@ const savePurchase = async () => {
     await loadPurchases()
     closeCreateDialog()
   } catch (error) {
-    toast.error('فشل حفظ أمر الشراء')
+    toast.error(error.response?.data?.message || 'فشل حفظ أمر الشراء')
     console.error(error)
   } finally {
     saving.value = false
@@ -949,7 +953,7 @@ const confirmReceive = async () => {
     closeReceiveDialog()
   } catch (error) {
     console.error('❌ Receive error:', error)
-    toast.error('فشل تأكيد الاستلام')
+    toast.error(error.response?.data?.message || 'فشل تأكيد الاستلام')
   } finally {
     saving.value = false
   }
@@ -980,11 +984,14 @@ const printPurchase = async (purchase) => {
     }
   }
 
+  const escapeHtml = (v) => String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]))
+  const supplierName = fullPurchase.supplierName || purchase.supplierName || 'غير محدد'
+
   // Generate items HTML
   const itemsHtml = fullPurchase.items.map(item => 
     '<tr>' +
-      '<td>' + item.ingredientName + '</td>' +
-      '<td>' + item.unit + '</td>' +
+      '<td>' + escapeHtml(item.ingredientName) + '</td>' +
+      '<td>' + escapeHtml(item.unit) + '</td>' +
       '<td>' + item.orderedQuantity + '</td>' +
       '<td>' + Number(item.unitPrice).toLocaleString() + ' د.ع</td>' +
       '<td><strong>' + (item.orderedQuantity * item.unitPrice).toLocaleString() + ' د.ع</strong></td>' +
@@ -995,11 +1002,9 @@ const printPurchase = async (purchase) => {
   const notesHtml = fullPurchase.notes ? 
     '<div class="notes-section">' +
       '<h4>📝 ملاحظات:</h4>' +
-      '<div class="notes-content">' + fullPurchase.notes + '</div>' +
+      '<div class="notes-content">' + escapeHtml(fullPurchase.notes) + '</div>' +
     '</div>' : ''
 
-  // Calculate totals
-  const totalQuantity = fullPurchase.items.reduce((sum, item) => sum + parseFloat(item.orderedQuantity), 0)
   const statusClass = fullPurchase.status === 'received' ? 'received' : 
                       fullPurchase.status === 'partially_received' ? 'partial' : 'pending'
 
@@ -1305,7 +1310,7 @@ const printPurchase = async (purchase) => {
 '<html dir="rtl" lang="ar">' +
 '<head>' +
 '  <meta charset="UTF-8">' +
-'  <title>أمر شراء - ' + fullPurchase.purchaseNumber + '</title>' +
+'  <title>أمر شراء - ' + escapeHtml(fullPurchase.purchaseNumber) + '</title>' +
 '  <style>' + cssStyles + '</style>' +
 '</head>' +
 '<body>' +
@@ -1326,7 +1331,11 @@ const printPurchase = async (purchase) => {
 '        <h3>📋 معلومات أمر الشراء</h3>' +
 '        <div class="info-row">' +
 '          <span class="info-label">رقم الأمر:</span>' +
-'          <span class="info-value purchase-number">' + fullPurchase.purchaseNumber + '</span>' +
+'          <span class="info-value purchase-number">' + escapeHtml(fullPurchase.purchaseNumber) + '</span>' +
+'        </div>' +
+'        <div class="info-row">' +
+'          <span class="info-label">المورد:</span>' +
+'          <span class="info-value">' + escapeHtml(supplierName) + '</span>' +
 '        </div>' +
 '        <div class="info-row">' +
 '          <span class="info-label">تاريخ الطلب:</span>' +
@@ -1363,10 +1372,6 @@ const printPurchase = async (purchase) => {
 '      <div class="total-row">' +
 '        <span class="total-label">عدد الأصناف:</span>' +
 '        <span class="total-amount">' + fullPurchase.items.length + ' صنف</span>' +
-'      </div>' +
-'      <div class="total-row">' +
-'        <span class="total-label">إجمالي الكمية:</span>' +
-'        <span class="total-amount">' + totalQuantity + ' وحدة</span>' +
 '      </div>' +
 '      <div class="total-row grand-total">' +
 '        <span class="total-label">💰 المبلغ الإجمالي:</span>' +

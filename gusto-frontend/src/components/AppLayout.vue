@@ -2,7 +2,7 @@
   <v-app>
     <!-- Mobile Top Bar -->
     <header v-if="isMobile" class="mobile-topbar">
-      <button class="mobile-topbar__menu" @click="drawerOpen = !drawerOpen">
+      <button class="mobile-topbar__menu" :aria-label="drawerOpen ? 'إغلاق القائمة' : 'فتح القائمة'" :title="drawerOpen ? 'إغلاق القائمة' : 'فتح القائمة'" @click="drawerOpen = !drawerOpen">
         <PhList :size="22" weight="bold" />
       </button>
       <div class="mobile-topbar__brand">
@@ -11,7 +11,7 @@
         </v-avatar>
         <span class="mobile-topbar__name">جوستو</span>
       </div>
-      <button class="mobile-topbar__action" @click="themeStore.toggle()">
+      <button class="mobile-topbar__action" :aria-label="themeStore.isDark ? 'الوضع الفاتح' : 'الوضع الداكن'" :title="themeStore.isDark ? 'الوضع الفاتح' : 'الوضع الداكن'" @click="themeStore.toggle()">
         <PhMoon v-if="themeStore.isDark" :size="18" weight="duotone" />
         <PhSun v-else :size="18" weight="duotone" />
       </button>
@@ -39,10 +39,10 @@
           <span class="nav-logo__name">جوستو</span>
           <span class="nav-logo__sub">Gusto Restaurant</span>
         </div>
-        <button v-if="isMobile" class="nav-close" @click="drawerOpen = false">
+        <button v-if="isMobile" class="nav-close" aria-label="إغلاق القائمة" title="إغلاق القائمة" @click="drawerOpen = false">
           <PhX :size="18" weight="bold" />
         </button>
-        <button v-else class="nav-theme-toggle" @click="themeStore.toggle()" :title="themeStore.isDark ? 'الوضع الفاتح' : 'الوضع الداكن'">
+        <button v-else class="nav-theme-toggle" @click="themeStore.toggle()" :title="themeStore.isDark ? 'الوضع الفاتح' : 'الوضع الداكن'" :aria-label="themeStore.isDark ? 'الوضع الفاتح' : 'الوضع الداكن'">
           <PhMoon v-if="themeStore.isDark" :size="18" weight="duotone" />
           <PhSun v-else :size="18" weight="duotone" />
         </button>
@@ -52,7 +52,7 @@
       <nav ref="navMenu" class="nav-menu">
         <!-- الرئيسية -->
         <router-link
-          :to="authStore.user?.role === 'storage' ? '/storage-dashboard' : '/dashboard'"
+          :to="homeFor(authStore.user?.role)"
           class="nav-item"
           :class="{ 'nav-item--active': $route.path === '/dashboard' || $route.path === '/storage-dashboard' }"
           @click="closeMobile"
@@ -61,143 +61,19 @@
           <span class="nav-item__label">الرئيسية</span>
         </router-link>
 
-        <!-- نقطة البيع والعمليات -->
-        <template v-if="hasRole(['admin']) || hasRole(['cashier']) || hasRole(['kitchen']) || hasRole(['barista'])">
-          <div class="nav-group">نقطة البيع والعمليات</div>
-          <router-link v-if="hasRole(['admin', 'cashier'])" to="/cashier" class="nav-item" :class="{ 'nav-item--active': $route.path === '/cashier' }" @click="closeMobile">
-            <span class="nav-item__icon"><PhCurrencyDollar :size="18" weight="duotone" /></span>
-            <span class="nav-item__label">نقطة البيع</span>
-          </router-link>
-          <router-link v-if="hasRole(['admin', 'kitchen'])" to="/kitchen" class="nav-item" :class="{ 'nav-item--active': $route.path === '/kitchen' }" @click="closeMobile">
-            <span class="nav-item__icon"><PhChefHat :size="18" weight="duotone" /></span>
-            <span class="nav-item__label">شاشة المطبخ</span>
-          </router-link>
-          <router-link v-if="hasRole(['kitchen']) && !hasRole(['admin'])" to="/kitchen-stock" class="nav-item" :class="{ 'nav-item--active': $route.path === '/kitchen-stock' }" @click="closeMobile">
-            <span class="nav-item__icon"><PhCookingPot :size="18" weight="duotone" /></span>
-            <span class="nav-item__label">مخزن المطبخ</span>
-          </router-link>
-          <router-link v-if="hasRole(['admin', 'kitchen', 'barista'])" to="/barista" class="nav-item" :class="{ 'nav-item--active': $route.path === '/barista' }" @click="closeMobile">
-            <span class="nav-item__icon"><PhCoffee :size="18" weight="duotone" /></span>
-            <span class="nav-item__label">شاشة المشروبات</span>
-          </router-link>
-          <router-link v-if="hasRole(['admin', 'cashier'])" to="/daily-receipt" class="nav-item" :class="{ 'nav-item--active': $route.path === '/daily-receipt' }" @click="closeMobile">
-            <span class="nav-item__icon"><PhReceipt :size="18" weight="duotone" /></span>
-            <span class="nav-item__label">صندوق اليومية</span>
-          </router-link>
-        </template>
-
-        <!-- القائمة والمخزون -->
-        <template v-if="hasRole(['admin']) || hasRole(['storage'])">
-          <div class="nav-group">القائمة والمخزون</div>
-          <template v-if="hasRole(['admin'])">
-            <router-link to="/menu" class="nav-item" :class="{ 'nav-item--active': $route.path === '/menu' }" @click="closeMobile">
-              <span class="nav-item__icon"><PhForkKnife :size="18" weight="duotone" /></span>
-              <span class="nav-item__label">إدارة القائمة</span>
-            </router-link>
-            <router-link to="/inventory" class="nav-item" :class="{ 'nav-item--active': $route.path === '/inventory' }" @click="closeMobile">
-              <span class="nav-item__icon"><PhPackage :size="18" weight="duotone" /></span>
-              <span class="nav-item__label">المخزون</span>
-            </router-link>
-            <router-link to="/purchases" class="nav-item" :class="{ 'nav-item--active': $route.path === '/purchases' }" @click="closeMobile">
-              <span class="nav-item__icon"><PhShoppingCart :size="18" weight="duotone" /></span>
-              <span class="nav-item__label">المشتريات</span>
-            </router-link>
-            <router-link to="/receiving" class="nav-item" :class="{ 'nav-item--active': $route.path === '/receiving' }" @click="closeMobile">
-              <span class="nav-item__icon"><PhPackage :size="18" weight="duotone" /></span>
-              <span class="nav-item__label">الاستلام</span>
-            </router-link>
-            <router-link to="/transfers" class="nav-item" :class="{ 'nav-item--active': $route.path === '/transfers' }" @click="closeMobile">
-              <span class="nav-item__icon"><PhArrowRight :size="18" weight="duotone" /></span>
-              <span class="nav-item__label">نقل للمخزن الداخلي</span>
-            </router-link>
-            <router-link to="/kitchen-stock" class="nav-item" :class="{ 'nav-item--active': $route.path === '/kitchen-stock' }" @click="closeMobile">
-              <span class="nav-item__icon"><PhCookingPot :size="18" weight="duotone" /></span>
-              <span class="nav-item__label">مخزن المطبخ</span>
-            </router-link>
-          </template>
-          <template v-if="hasRole(['storage']) && !hasRole(['admin'])">
-            <router-link to="/inventory" class="nav-item" :class="{ 'nav-item--active': $route.path === '/inventory' }" @click="closeMobile">
-              <span class="nav-item__icon"><PhPackage :size="18" weight="duotone" /></span>
-              <span class="nav-item__label">المخزون</span>
-            </router-link>
-            <router-link to="/receiving" class="nav-item" :class="{ 'nav-item--active': $route.path === '/receiving' }" @click="closeMobile">
-              <span class="nav-item__icon"><PhPackage :size="18" weight="duotone" /></span>
-              <span class="nav-item__label">الاستلام</span>
-            </router-link>
-            <router-link to="/transfers" class="nav-item" :class="{ 'nav-item--active': $route.path === '/transfers' }" @click="closeMobile">
-              <span class="nav-item__icon"><PhArrowRight :size="18" weight="duotone" /></span>
-              <span class="nav-item__label">نقل للمخزن الداخلي</span>
-            </router-link>
-            <router-link to="/kitchen-stock" class="nav-item" :class="{ 'nav-item--active': $route.path === '/kitchen-stock' }" @click="closeMobile">
-              <span class="nav-item__icon"><PhCookingPot :size="18" weight="duotone" /></span>
-              <span class="nav-item__label">مخزن المطبخ</span>
-            </router-link>
-          </template>
-        </template>
-
-        <!-- المالية -->
-        <template v-if="hasRole(['admin'])">
-          <div class="nav-group">المالية</div>
-          <router-link to="/accounts" class="nav-item" :class="{ 'nav-item--active': $route.path === '/accounts' }" @click="closeMobile">
-            <span class="nav-item__icon"><PhListBullets :size="18" weight="duotone" /></span>
-            <span class="nav-item__label">دليل الحسابات</span>
-          </router-link>
-          <router-link to="/posting-settings" class="nav-item" :class="{ 'nav-item--active': $route.path === '/posting-settings' }" @click="closeMobile">
-            <span class="nav-item__icon"><PhGear :size="18" weight="duotone" /></span>
-            <span class="nav-item__label">إعدادات الترحيل</span>
-          </router-link>
-          <router-link to="/posting-entries" class="nav-item" :class="{ 'nav-item--active': $route.path === '/posting-entries' }" @click="closeMobile">
-            <span class="nav-item__icon"><PhListBullets :size="18" weight="duotone" /></span>
-            <span class="nav-item__label">قيود الترحيل</span>
-          </router-link>
-          <router-link to="/order-payments" class="nav-item" :class="{ 'nav-item--active': $route.path === '/order-payments' }" @click="closeMobile">
-            <span class="nav-item__icon"><PhReceipt :size="18" weight="duotone" /></span>
-            <span class="nav-item__label">دفعات الطلبات</span>
-          </router-link>
-          <router-link to="/expenses" class="nav-item" :class="{ 'nav-item--active': $route.path === '/expenses' }" @click="closeMobile">
-            <span class="nav-item__icon"><PhReceipt :size="18" weight="duotone" /></span>
-            <span class="nav-item__label">المصروفات</span>
-          </router-link>
-          <router-link to="/outer-incomes" class="nav-item" :class="{ 'nav-item--active': $route.path === '/outer-incomes' }" @click="closeMobile">
-            <span class="nav-item__icon"><PhMoney :size="18" weight="duotone" /></span>
-            <span class="nav-item__label">إيرادات خارجية</span>
-          </router-link>
-          <router-link to="/customers" class="nav-item" :class="{ 'nav-item--active': $route.path.startsWith('/customers') }" @click="closeMobile">
-            <span class="nav-item__icon"><PhUsers :size="18" weight="duotone" /></span>
-            <span class="nav-item__label">العملاء (آجل)</span>
-          </router-link>
-          <router-link to="/suppliers" class="nav-item" :class="{ 'nav-item--active': $route.path.startsWith('/suppliers') }" @click="closeMobile">
-            <span class="nav-item__icon"><PhStorefront :size="18" weight="duotone" /></span>
-            <span class="nav-item__label">الموردون</span>
-          </router-link>
-          <router-link to="/tips" class="nav-item" :class="{ 'nav-item--active': $route.path === '/tips' }" @click="closeMobile">
-            <span class="nav-item__icon"><PhMoney :size="18" weight="duotone" /></span>
-            <span class="nav-item__label">البقشيش</span>
-          </router-link>
-          <router-link to="/box" class="nav-item" :class="{ 'nav-item--active': $route.path === '/box' }" @click="closeMobile">
-            <span class="nav-item__icon"><PhWallet :size="18" weight="duotone" /></span>
-            <span class="nav-item__label">الصندوق</span>
-          </router-link>
-        </template>
-
-        <!-- الإدارة -->
-        <template v-if="hasRole(['admin', 'supervisor'])">
-          <div class="nav-group">الإدارة</div>
-          <router-link v-if="hasRole(['admin'])" to="/staff" class="nav-item" :class="{ 'nav-item--active': $route.path === '/staff' }" @click="closeMobile">
-            <span class="nav-item__icon"><PhUsers :size="18" weight="duotone" /></span>
-            <span class="nav-item__label">الموظفين</span>
-          </router-link>
-          <router-link v-if="hasRole(['admin'])" to="/orders" class="nav-item" :class="{ 'nav-item--active': $route.path === '/orders' }" @click="closeMobile">
-            <span class="nav-item__icon"><PhReceipt :size="18" weight="duotone" /></span>
-            <span class="nav-item__label">الطلبات</span>
-          </router-link>
-          <router-link to="/returns" class="nav-item" :class="{ 'nav-item--active': $route.path === '/returns' }" @click="closeMobile">
-            <span class="nav-item__icon"><PhArrowUUpLeft :size="18" weight="duotone" /></span>
-            <span class="nav-item__label">المرتجعات والهدر</span>
-          </router-link>
-          <router-link v-if="hasRole(['admin'])" to="/reports" class="nav-item" :class="{ 'nav-item--active': $route.path === '/reports' }" @click="closeMobile">
-            <span class="nav-item__icon"><PhChartLine :size="18" weight="duotone" /></span>
-            <span class="nav-item__label">التقارير</span>
+        <!-- Groups and links come from config/navigation.js (same rules as the router) -->
+        <template v-for="group in visibleGroups" :key="group.title">
+          <div class="nav-group">{{ group.title }}</div>
+          <router-link
+            v-for="item in group.items"
+            :key="item.to"
+            :to="item.to"
+            class="nav-item"
+            :class="{ 'nav-item--active': item.prefix ? $route.path.startsWith(item.to) : $route.path === item.to }"
+            @click="closeMobile"
+          >
+            <span class="nav-item__icon"><component :is="navIcons[item.icon]" :size="18" weight="duotone" /></span>
+            <span class="nav-item__label">{{ item.label }}</span>
           </router-link>
         </template>
       </nav>
@@ -209,19 +85,10 @@
             <div class="nav-user__avatar">{{ userInitial }}</div>
             <div class="nav-user__meta">
               <span class="nav-user__name">{{ authStore.user?.fullName }}</span>
-              <span class="nav-user__role">{{
-                authStore.user?.role === 'admin' ? 'مدير' :
-                authStore.user?.role === 'supervisor' ? 'مشرف' :
-                authStore.user?.role === 'cashier' ? 'كاشير' :
-                authStore.user?.role === 'kitchen' ? 'مطبخ' :
-                authStore.user?.role === 'barista' ? 'البار' :
-                authStore.user?.role === 'purchases' ? 'مشتريات' :
-                authStore.user?.role === 'storage' ? 'مخزون' :
-                authStore.user?.role
-              }}</span>
+              <span class="nav-user__role">{{ ROLE_LABELS[authStore.user?.role] || authStore.user?.role }}</span>
             </div>
           </div>
-          <button class="nav-user__logout" @click="authStore.logout">
+          <button class="nav-user__logout" aria-label="تسجيل الخروج" title="تسجيل الخروج" @click="logout">
             <PhSignOut :size="16" weight="bold" />
             <span>خروج</span>
           </button>
@@ -246,7 +113,8 @@ let savedNavScrollTop = 0
 import { ref, computed, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { useAuthStore } from '@/stores/auth'
 import { useThemeStore } from '@/stores/theme'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
+import { NAV_GROUPS, ROLE_LABELS, canOpen, homeFor } from '@/config/navigation'
 import logoImg from '@/assets/logo.png'
 import {
   PhHouse, PhCurrencyDollar, PhChefHat, PhCoffee, PhForkKnife,
@@ -258,6 +126,21 @@ import {
 const authStore = useAuthStore()
 const themeStore = useThemeStore()
 const route = useRoute()
+const router = useRouter()
+
+const navIcons = {
+  PhCurrencyDollar, PhChefHat, PhCoffee, PhForkKnife, PhPackage, PhShoppingCart, PhUsers, PhReceipt,
+  PhChartLine, PhWallet, PhStorefront, PhMoney, PhListBullets, PhGear, PhArrowRight, PhCookingPot, PhArrowUUpLeft,
+}
+// Only groups with at least one page this role may open
+const visibleGroups = computed(() =>
+  NAV_GROUPS.map((g) => ({ ...g, items: g.items.filter((i) => canOpen(authStore.user?.role, i.to)) })).filter((g) => g.items.length)
+)
+
+function logout() {
+  authStore.logout()
+  router.push('/login')
+}
 
 const MOBILE_BREAKPOINT = 960
 const windowWidth = ref(typeof window !== 'undefined' ? window.innerWidth : 1200)

@@ -1,5 +1,5 @@
 const db = require("../models/db");
-const { todayBusinessDate, businessWindow } = require("../services/businessDay");
+const { todayBusinessDate, businessWindow, localDateTime } = require("../services/businessDay");
 const Expense = require("../models/expense.model");
 const Purchase = require("../models/purchase.model");
 const Order = require("../models/order.model");
@@ -36,58 +36,31 @@ exports.getBalance = (req, res) => {
           });
         }
         
-        // If there's a closed receipt, calculate all values properly
+        // Shift closed today: same per-shift figures as the open-shift view; the balance is the
+        // cash actually counted at close, and the expected figure is the one stored at close.
         if (closedReceipts && closedReceipts.length > 0) {
           const closedReceipt = closedReceipts[0];
-          
-          // Get actual sales for the date (might be more accurate than stored value)
-          Order.getDailySummary(today, (err, salesSummary) => {
-            const totalSales = parseFloat(salesSummary?.totalSales || closedReceipt.totalSales || 0);
-            
-            // Get actual expenses for the date
-            Expense.getTotal(today, today, (err, expenseTotal) => {
-              const totalExpenses = parseFloat(expenseTotal?.totalExpenses || closedReceipt.totalExpenses || 0);
-              
-              // Get actual purchases for the date
-              const purchaseQuery = `
-                SELECT COALESCE(SUM(totalAmount), 0) as totalPurchases
-                FROM Purchases
-                WHERE DATE(purchaseDate) = ? 
-                  AND status IN ('received', 'partially_received')
-              `;
-              
-              db.query(purchaseQuery, [today], (err, purchaseResult) => {
-                if (err) {
-                  return res.status(500).json({
-                    message: err.message || "Error retrieving purchases."
-                  });
-                }
-                
-                const totalPurchases = parseFloat(purchaseResult[0]?.totalPurchases || 0);
-                const openingCash = parseFloat(closedReceipt.openingCash || 0);
-                
-                // For closed receipt, use the actual closing cash
-                const currentBalance = parseFloat(closedReceipt.closingCash || 0);
-                const expectedBalance = parseFloat(closedReceipt.expectedCash || 0);
-                
-                // Other incomes for this closed shift (were included in expectedCash at close)
-                OtherIncome.getTotalsByShift(closedReceipt.idDailyReceipt, (oiErr, oiTotals) => {
-                  const totalOtherIncomes = oiTotals && !oiErr ? (oiTotals.total || 0) : 0;
-                  return res.json({
-                    openingCash: openingCash,
-                    totalSales: totalSales,
-                    totalExpenses: totalExpenses,
-                    totalPurchases: totalPurchases,
-                    totalOtherIncomes: totalOtherIncomes,
-                    currentBalance: currentBalance,
-                    expectedBalance: expectedBalance,
-                    receiptDate: closedReceipt.receiptDate,
-                    isOpen: false,
-                    isClosed: true,
-                    closingCash: currentBalance
-                  });
-                });
-              });
+          const { withShiftCash } = require("./dailyReceipt.controller");
+          withShiftCash({ ...closedReceipt }, (shift) => {
+            const closingCash = parseFloat(closedReceipt.closingCash || 0);
+            res.json({
+              openingCash: parseFloat(closedReceipt.openingCash || 0),
+              totalSales: shift.totalSales,
+              cashSales: shift.cashSales,
+              cardSales: shift.cardSales,
+              creditSales: shift.creditSales,
+              totalExpenses: shift.totalExpenses,
+              cashExpenses: shift.cashExpenses,
+              totalPurchases: shift.cashPurchases,
+              totalOtherIncomes: shift.totalOtherIncomes,
+              otherIncomesCash: shift.otherIncomesCash,
+              customerCash: shift.customerCash,
+              currentBalance: closingCash,
+              expectedBalance: parseFloat(closedReceipt.expectedCash ?? shift.expectedCash),
+              receiptDate: closedReceipt.receiptDate,
+              isOpen: false,
+              isClosed: true,
+              closingCash
             });
           });
           return; // Exit early
@@ -478,7 +451,7 @@ exports.transfer = (req, res) => {
       return res.status(500).json({ message: "لم يتم العثور على إعدادات الترحيل." });
     }
 
-    const entryDate = new Date().toISOString().slice(0, 19).replace("T", " ");
+    const entryDate = localDateTime();
     const memo = notes || "تحويل بين الصناديق";
     const userId = req.userId || null;
 

@@ -141,7 +141,7 @@
               إجمالي الطلبات
             </p>
             <h2 class="text-h4 font-weight-bold mb-1" style="color: var(--t-text);">
-              {{ filteredOrders.length }}
+              {{ search ? filteredOrders.length : ordersTotal }}
             </h2>
           </v-card>
         </v-col>
@@ -261,7 +261,7 @@
 
             <template v-slot:item.totalAmount="{ item }">
               <span class="font-weight-bold" style="color: #046375;">
-                {{ Number((Number(item.totalAmount || 0) - Number(item.discount || 0))).toLocaleString() }} د.ع
+                {{ Number(item.totalAmount || 0).toLocaleString() }} د.ع
               </span>
             </template>
 
@@ -275,7 +275,7 @@
 
             <template v-slot:item.orderType="{ item }">
               <v-chip size="small" style="background: var(--t-border-subtle); color: #046375;">
-                {{ item.orderType === 'cashier' ? 'كاشير' : 'QR' }}
+                {{ item.saleType === 'credit' ? 'آجل' : item.orderType === 'card' ? 'بطاقة' : item.orderType === 'qr' ? 'QR' : 'نقدي' }}
               </v-chip>
             </template>
 
@@ -301,6 +301,18 @@
                   :disabled="item.status === 'cancelled'"
                 >
                   <PhArrowUUpLeft :size="20" weight="bold" />
+                </v-btn>
+                <v-btn
+                  v-if="canCancel && !['cancelled', 'completed'].includes(item.status)"
+                  icon
+                  size="small"
+                  variant="text"
+                  style="color: #b91c1c;"
+                  @click="cancelOrder(item)"
+                  title="إلغاء الطلب"
+                  aria-label="إلغاء الطلب"
+                >
+                  <PhXCircle :size="20" weight="bold" />
                 </v-btn>
                 <v-btn
                   icon
@@ -395,9 +407,9 @@
                 </v-chip>
               </div>
               <div class="mb-3">
-                <div class="text-caption text-grey mb-1">المجموع الفرعي</div>
+                <div class="text-caption text-grey mb-1">المجموع قبل الخصم</div>
                 <div class="text-body-1">
-                  {{ Number(selectedOrder.totalAmount || 0).toLocaleString() }} د.ع
+                  {{ (Number(selectedOrder.totalAmount || 0) + Number(selectedOrder.discount || 0)).toLocaleString() }} د.ع
                 </div>
               </div>
               <div class="mb-3" v-if="Number(selectedOrder.discount || 0) > 0">
@@ -409,7 +421,7 @@
               <div class="mb-3">
                 <div class="text-caption mb-1" style="color: var(--t-text-dim);">الإجمالي</div>
                 <div class="text-h6 font-weight-bold" style="color: #046375;">
-                  {{ Number((Number(selectedOrder.totalAmount || 0) - Number(selectedOrder.discount || 0))).toLocaleString() }} د.ع
+                  {{ Number(selectedOrder.totalAmount || 0).toLocaleString() }} د.ع
                 </div>
               </div>
             </v-col>
@@ -813,6 +825,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { orderAPI, orderReturnAPI, menuAPI, itemSizeAPI, customerAPI, authAPI } from '@/services/api'
 import { useToast } from 'vue-toastification'
+import { todayBusinessDate } from '@/utils/dateFormatter'
 import { useAuthStore } from '@/stores/auth'
 import { formatDate, formatCurrentDateArabic } from '@/utils/dateFormatter'
 import logoImg from '@/assets/logo.png'
@@ -822,7 +835,7 @@ import {
   PhDotsThreeVertical, PhDownload, PhPrinter, PhArrowClockwise,
   PhFunnel, PhCalendar, PhMagnifyingGlass, PhEye, PhPackage,
   PhCurrencyDollar, PhForkKnife, PhX, PhArrowUUpLeft, PhArrowRight,
-  PhShieldCheck
+  PhShieldCheck, PhXCircle
 } from '@phosphor-icons/vue'
 
 const toast = useToast()
@@ -842,7 +855,7 @@ const loading = ref({
 })
 const search = ref('')
 const filterStatus = ref(null)
-const filterDate = ref(null)
+const filterDate = ref(todayBusinessDate())
 const showOrderDialog = ref(false)
 const selectedOrder = ref(null)
 const orderItems = ref([])
@@ -900,29 +913,7 @@ const headers = [
 const filteredOrders = computed(() => {
   let filtered = orders.value
 
-  // Filter by status
-  if (filterStatus.value) {
-    filtered = filtered.filter(order => order.status === filterStatus.value)
-  }
-
-  // Filter by date (Cafe day starts at 7:00 AM and ends at 2:59:59 AM next day)
-  if (filterDate.value) {
-    const selectedDate = new Date(filterDate.value)
-    // Start of cafe day: 7:00 AM of selected date
-    const startOfDay = new Date(selectedDate)
-    startOfDay.setHours(7, 0, 0, 0)
-    
-    // End of cafe day: 2:59:59 AM of next day
-    const endOfDay = new Date(selectedDate)
-    endOfDay.setDate(endOfDay.getDate() + 1)
-    endOfDay.setHours(2, 59, 59, 999)
-    
-    filtered = filtered.filter(order => {
-      const orderDate = new Date(order.orderDate)
-      return orderDate >= startOfDay && orderDate <= endOfDay
-    })
-  }
-
+  // Status and date are filtered by the server (business day 03:00 → 02:59)
   // Search
   if (search.value) {
     const searchLower = search.value.toLowerCase()
@@ -936,20 +927,31 @@ const filteredOrders = computed(() => {
   return filtered
 })
 
-const totalSales = computed(() => {
-  return filteredOrders.value.reduce((sum, order) => {
-    // Calculate final amount: totalAmount - discount
-    const finalAmount = Number(order.totalAmount || 0) - Number(order.discount || 0)
-    return sum + finalAmount
-  }, 0)
-})
+// Totals come from the server over every matching order (not just the rows loaded here);
+// totalAmount is already after discount, and cancelled orders don't count as sales
+const ordersSummary = ref({ totalSales: 0, byStatus: {} })
+const ordersTotal = ref(0)
+const totalSales = computed(() => (search.value
+  ? filteredOrders.value.filter(o => o.status !== 'cancelled').reduce((sum, o) => sum + Number(o.totalAmount || 0), 0)
+  : Number(ordersSummary.value.totalSales || 0)))
 
-const statusCount = (status) => {
-  return orders.value.filter(order => order.status === status).length
-}
+const statusCount = (status) => Number(ordersSummary.value.byStatus?.[status] || 0)
 
-const filteredStatusCount = (status) => {
-  return filteredOrders.value.filter(order => order.status === status).length
+const filteredStatusCount = (status) => (search.value
+  ? filteredOrders.value.filter(order => order.status === status).length
+  : statusCount(status))
+
+const canCancel = computed(() => ['admin', 'supervisor'].includes(authStore.user?.role))
+
+const cancelOrder = async (order) => {
+  if (!confirm(`إلغاء الطلب ${order.orderNumber}؟ سيُخصم من المبيعات وتعود المواد غير المحضّرة للمخزن.`)) return
+  try {
+    await orderAPI.updateStatus(order.idOrder, 'cancelled')
+    toast.success('تم إلغاء الطلب')
+    loadOrders()
+  } catch (error) {
+    toast.error(error.response?.data?.message || 'تعذّر إلغاء الطلب')
+  }
 }
 
 const getStatusColor = (status) => {
@@ -989,7 +991,7 @@ const formatDateTime = (dateString) => {
 const loadOrders = async () => {
   loading.value.orders = true
   try {
-    const params = {}
+    const params = { limit: 500 }
     if (filterStatus.value) params.status = filterStatus.value
     if (filterDate.value) params.date = filterDate.value
     
@@ -1012,8 +1014,12 @@ const loadOrders = async () => {
       ordersData = []
     }
     
-    console.log('Parsed orders:', ordersData)
     orders.value = ordersData
+    ordersSummary.value = response?.data?.summary || { totalSales: 0, byStatus: {} }
+    ordersTotal.value = Number(response?.data?.total || ordersData.length)
+    if (ordersTotal.value > ordersData.length) {
+      toast.info(`يُعرض أحدث ${ordersData.length} طلب من ${ordersTotal.value} — اختر تاريخاً لعرض يوم محدد`)
+    }
     
     if (ordersData.length === 0 && !filterStatus.value && !filterDate.value) {
       toast.info('لا توجد طلبات في النظام')
@@ -1093,7 +1099,7 @@ const cancelAuth = () => {
 const proceedToReturnDialog = async (order) => {
   returnOrder.value = order
   showReturnDialog.value = true
-  refundMethod.value = 'cash'
+  refundMethod.value = order.saleType === 'credit' ? 'credit' : 'cash'
   refundCustomerId.value = order.customerId || null
   returnNotes.value = ''
   returnableItems.value = []

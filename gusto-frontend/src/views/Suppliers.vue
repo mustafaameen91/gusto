@@ -201,6 +201,8 @@
               size="small"
               @click="viewProfile(item)"
               color="#046375"
+              aria-label="عرض ملف المورد"
+              title="عرض ملف المورد"
             >
               <PhEye :size="18" weight="bold" />
             </v-btn>
@@ -209,7 +211,9 @@
               variant="text"
               size="small"
               @click="editSupplier(item)"
-              color="#3B82F6"
+              color="primary"
+              aria-label="تعديل المورد"
+              title="تعديل المورد"
             >
               <PhPencilSimple :size="18" weight="bold" />
             </v-btn>
@@ -219,6 +223,8 @@
               size="small"
               @click="deleteSupplier(item)"
               color="#EF4444"
+              aria-label="حذف المورد"
+              title="حذف المورد"
             >
               <PhTrash :size="18" weight="bold" />
             </v-btn>
@@ -383,7 +389,7 @@ import { useToast } from 'vue-toastification'
 import AppLayout from '@/components/AppLayout.vue'
 import logoImg from '@/assets/logo.png'
 import { supplierAPI } from '@/services/api'
-import { formatCurrentDateArabic } from '@/utils/dateFormatter'
+import { formatCurrentDateArabic, todayBusinessDate } from '@/utils/dateFormatter'
 import { PhPlus, PhUsers, PhEye, PhPencilSimple, PhTrash, PhCurrencyDollar, PhMoney, PhReceipt, PhMagnifyingGlass, PhArrowsLeftRight } from '@phosphor-icons/vue'
 import { useAuthStore } from '@/stores/auth'
 import * as XLSX from 'xlsx'
@@ -441,7 +447,7 @@ const transferForm = ref({
   fromSupplierId: null,
   toSupplierId: null,
   amount: null,
-  transferDate: new Date().toISOString().slice(0, 10),
+  transferDate: todayBusinessDate(),
   notes: ''
 })
 const transferErrors = ref({ amount: '' })
@@ -455,7 +461,7 @@ const exportSuppliersToExcel = () => {
     }
 
     const workbook = XLSX.utils.book_new()
-    const today = new Date().toISOString().split('T')[0]
+    const today = todayBusinessDate()
 
     // Helper: total payments = SupplierPayments + Expense-based payments
     const totalPaidOf = (s) => Number(s.totalPayments || 0) + Number(s.totalExpensePayments || 0)
@@ -558,7 +564,7 @@ const loadSuppliers = async () => {
     const response = await supplierAPI.getAll()
     suppliers.value = response.data || []
   } catch (error) {
-    toast.error('فشل تحميل الديون')
+    toast.error(error.response?.data?.message || 'فشل تحميل الديون')
     console.error(error)
   } finally {
     loading.value.suppliers = false
@@ -571,7 +577,7 @@ const loadStats = async () => {
     const response = await supplierAPI.getSummaryStats()
     stats.value = response.data || { totalDebt: 0, totalPaid: 0, remaining: 0 }
   } catch (error) {
-    toast.error('فشل تحميل الإحصائيات')
+    toast.error(error.response?.data?.message || 'فشل تحميل الإحصائيات')
     console.error(error)
   } finally {
     loading.value.stats = false
@@ -611,7 +617,7 @@ const openTransferDialog = () => {
     fromSupplierId: null,
     toSupplierId: null,
     amount: null,
-    transferDate: new Date().toISOString().slice(0, 10),
+    transferDate: todayBusinessDate(),
     notes: ''
   }
   transferErrors.value = { amount: '' }
@@ -679,7 +685,7 @@ const saveSupplier = async () => {
     loadSuppliers()
     loadStats()
   } catch (error) {
-    toast.error(editingSupplier.value ? 'فشل تحديث الدين' : 'فشل إضافة الدين')
+    toast.error(error.response?.data?.message || (editingSupplier.value ? 'فشل تحديث الدين' : 'فشل إضافة الدين'))
     console.error(error)
   }
 }
@@ -693,7 +699,7 @@ const deleteSupplier = async (supplier) => {
     loadSuppliers()
     loadStats()
   } catch (error) {
-    toast.error('فشل حذف الدين')
+    toast.error(error.response?.data?.message || 'فشل حذف الدين')
     console.error(error)
   }
 }

@@ -35,4 +35,8 @@ function businessWindow(startDate, endDate = startDate) {
 // Business date of a stored DATETIME/TIMESTAMP, as SQL (for GROUP BY day)
 const businessDateSql = (column) => `DATE(${column} - INTERVAL ${CUTOFF_HOUR} HOUR)`;
 
-module.exports = { addDays, businessDateOf, todayBusinessDate, businessWindow, businessDateSql };
+// Local (restaurant time zone) "YYYY-MM-DD HH:MM:SS" for DATETIME columns; toISOString() would be UTC
+const localDateTime = (d = new Date()) =>
+  `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+
+module.exports = { addDays, businessDateOf, todayBusinessDate, businessWindow, businessDateSql, localDateTime };

@@ -30,9 +30,9 @@ html, :root {
   --t-primary: #3FA7B9;
   --t-text: #e8e4df;
   --t-text-secondary: rgba(232,228,223,0.8);
-  --t-text-muted: rgba(232,228,223,0.6);
-  --t-text-dim: rgba(232,228,223,0.5);
-  --t-text-faint: rgba(232,228,223,0.4);
+  --t-text-muted: rgba(232,228,223,0.66);
+  --t-text-dim: rgba(232,228,223,0.6);   /* ≥4.5:1 on all dark surfaces */
+  --t-text-faint: rgba(232,228,223,0.45); /* ≥3:1: hints and icons only */
   --t-label: rgba(232,228,223,0.55);
   --t-sage: rgba(163,179,150,0.7);
   --t-sage-soft: rgba(163,179,150,0.6);
@@ -56,10 +56,10 @@ html[data-theme="light"] {
   --t-surface-alt: #fafaf7;
   --t-surface-high: #f0ede8;
   --t-text: #2c2419;
-  --t-text-secondary: rgba(44,36,25,0.75);
-  --t-text-muted: rgba(44,36,25,0.55);
-  --t-text-dim: rgba(44,36,25,0.4);
-  --t-text-faint: rgba(44,36,25,0.25);
+  --t-text-secondary: rgba(44,36,25,0.78);
+  --t-text-muted: rgba(44,36,25,0.7);
+  --t-text-dim: rgba(44,36,25,0.65);    /* ≥4.5:1 on all light surfaces */
+  --t-text-faint: rgba(44,36,25,0.52);  /* ≥3:1: hints and icons only */
   --t-label: rgba(44,36,25,0.45);
   --t-sage: rgba(80,100,70,0.85);
   --t-sage-soft: rgba(80,100,70,0.65);

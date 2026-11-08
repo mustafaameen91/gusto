@@ -9,7 +9,7 @@ module.exports = (app) => {
   router.use(authMiddleware.verifyToken);
 
   // Create a new tip (admin, cashier)
-  router.post("/", roleMiddleware.requireRole(["admin", "cashier"]), tips.create);
+  router.post("/", roleMiddleware.requireRole(["admin", "supervisor", "cashier"]), tips.create);
 
   // Get tip summary
   router.get("/summary", tips.getSummary);
@@ -21,7 +21,7 @@ module.exports = (app) => {
   router.get("/:id", tips.findById);
 
   // Update tip (admin, cashier)
-  router.put("/:id", roleMiddleware.requireRole(["admin", "cashier"]), tips.update);
+  router.put("/:id", roleMiddleware.requireRole(["admin", "supervisor", "cashier"]), tips.update);
 
   // Delete tip (admin only)
   router.delete("/:id", roleMiddleware.requireRole(["admin"]), tips.delete);

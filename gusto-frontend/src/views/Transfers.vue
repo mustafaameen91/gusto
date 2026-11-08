@@ -15,7 +15,7 @@
               </v-avatar>
               <div class="flex-grow-1">
                 <h1 class="text-h4 font-weight-bold text-white mb-2">نقل للمخزن الداخلي (المطبخ)</h1>
-                <p class="text-body-2 text-white" style="opacity: 0.9;">من المخزن الرئيسي → مخزن المطبخ</p>
+                <p class="text-body-2 text-white" style="opacity: 0.9;">من المخزن الرئيسي → مخزن المطبخ (داخلي)</p>
                 <p class="text-body-2 text-white" style="opacity: 0.85;">{{ currentDate }}</p>
               </div>
             </div>
@@ -233,7 +233,7 @@ async function loadBaristaStock() {
     baristaStock.value = Array.isArray(res.data) ? res.data : []
   } catch (e) {
     baristaStock.value = []
-    toast.error('فشل تحميل مخزن المطبخ')
+    toast.error('فشل تحميل مخزن المطبخ (داخلي)')
   } finally {
     loading.value.barista = false
   }

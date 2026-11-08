@@ -188,60 +188,43 @@ Order.getAll = (filters, result) => {
     }
   }
 
-  if (filters.date) {
-    // Cafe day starts at 7:00 AM and ends at 2:59:59 AM next day
-    // So a date like 2024-01-15 should include orders from 2024-01-15 07:00:00 to 2024-01-16 02:59:59
-    // Handle date string in YYYY-MM-DD format
-    let dateStr = filters.date;
-    if (dateStr.includes("T")) {
-      dateStr = dateStr.split("T")[0];
-    }
-
-    const selectedDate = new Date(dateStr + "T00:00:00");
-    if (isNaN(selectedDate.getTime())) {
-      // Invalid date, skip filter
-      console.error("Invalid date filter:", filters.date);
-    } else {
-      const startDate = new Date(selectedDate);
-      startDate.setHours(7, 0, 0, 0);
-
-      const endDate = new Date(selectedDate);
-      endDate.setDate(endDate.getDate() + 1);
-      endDate.setHours(2, 59, 59, 999);
-
-      // Format dates for MySQL (YYYY-MM-DD HH:mm:ss)
-      const formatDateForMySQL = (date) => {
-        const year = date.getFullYear();
-        const month = String(date.getMonth() + 1).padStart(2, "0");
-        const day = String(date.getDate()).padStart(2, "0");
-        const hours = String(date.getHours()).padStart(2, "0");
-        const minutes = String(date.getMinutes()).padStart(2, "0");
-        const seconds = String(date.getSeconds()).padStart(2, "0");
-        return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
-      };
-
-      query += " AND o.orderDate >= ? AND o.orderDate <= ?";
-      params.push(formatDateForMySQL(startDate));
-      params.push(formatDateForMySQL(endDate));
-    }
+  // Business-day dates (03:00 → 02:59): a single day, or a range startDate..endDate
+  const { businessWindow } = require("../services/businessDay");
+  const ymd = (v) => (v ? String(v).slice(0, 10) : null);
+  const from = ymd(filters.startDate || filters.date);
+  const to = ymd(filters.endDate || filters.date);
+  if (from && to && /^\d{4}-\d{2}-\d{2}$/.test(from) && /^\d{4}-\d{2}-\d{2}$/.test(to)) {
+    const w = businessWindow(from, to);
+    query += " AND o.orderDate >= ? AND o.orderDate <= ?";
+    params.push(w.startDateTime, w.endDateTime);
   }
+  if (filters.dailyReceiptId) {
+    query += " AND o.dailyReceiptId = ?";
+    params.push(filters.dailyReceiptId);
+  }
+
+  // Totals over everything that matches (not just this page): sales exclude cancelled orders
+  const fromWhere = query.slice(query.search(/\bFROM\b/));
+  const summaryQuery = `SELECT COUNT(*) AS total,
+      COALESCE(SUM(CASE WHEN o.status != 'cancelled' THEN o.totalAmount ELSE 0 END), 0) AS totalSales,
+      COALESCE(SUM(CASE WHEN o.status != 'cancelled' THEN o.discount ELSE 0 END), 0) AS totalDiscount,
+      SUM(o.status = 'pending') AS pending, SUM(o.status = 'preparing') AS preparing,
+      SUM(o.status = 'ready') AS ready, SUM(o.status = 'completed') AS completed,
+      SUM(o.status = 'cancelled') AS cancelled
+    ${fromWhere}`;
 
   query += " ORDER BY o.orderDate DESC";
 
-  // Get total count for pagination
-  const countQuery = query.replace(/SELECT[\s\S]*?FROM/, "SELECT COUNT(*) as total FROM");
-
-  db.query(countQuery, params, (err, countRes) => {
+  db.query(summaryQuery, params, (err, sumRes) => {
     if (err) {
       result(err, null);
       return;
     }
+    const sum = sumRes[0] || {};
+    const total = Number(sum.total || 0);
 
-    const total = countRes[0]?.total || 0;
-
-    // Apply pagination - default to 50 items per page if not specified
-    const page = parseInt(filters.page) || 1;
-    const limit = parseInt(filters.limit) || 50; // Default limit to prevent loading too many orders
+    const page = Math.max(1, parseInt(filters.page) || 1);
+    const limit = Math.min(500, Math.max(1, parseInt(filters.limit) || 50));
     const offset = (page - 1) * limit;
     query += ` LIMIT ? OFFSET ?`;
     params.push(limit, offset);
@@ -253,9 +236,17 @@ Order.getAll = (filters, result) => {
       }
       result(null, {
         items: res,
-        total: total,
-        page: page,
-        limit: limit,
+        total,
+        page,
+        limit,
+        summary: {
+          totalSales: Number(sum.totalSales || 0),
+          totalDiscount: Number(sum.totalDiscount || 0),
+          byStatus: {
+            pending: Number(sum.pending || 0), preparing: Number(sum.preparing || 0), ready: Number(sum.ready || 0),
+            completed: Number(sum.completed || 0), cancelled: Number(sum.cancelled || 0),
+          },
+        },
       });
     });
   });

@@ -60,16 +60,16 @@ import { ref, onMounted } from 'vue'
 import { useToast } from 'vue-toastification'
 import AppLayout from '@/components/AppLayout.vue'
 import { paymentAPI } from '@/services/api'
+import { todayBusinessDate, firstOfMonthYMD } from '@/utils/dateFormatter'
 
 const toast = useToast()
 const loading = ref(false)
 const payments = ref([])
 // Default: first day of current month → today, so recent payments show (not only today)
-const today = new Date()
-const firstOfMonth = new Date(today.getFullYear(), today.getMonth(), 1)
+const today = todayBusinessDate()
 const filters = ref({
-  startDate: firstOfMonth.toISOString().slice(0, 10),
-  endDate: today.toISOString().slice(0, 10),
+  startDate: firstOfMonthYMD(today),
+  endDate: today,
   limit: 200
 })
 

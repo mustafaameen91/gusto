@@ -83,7 +83,7 @@ S.roles = async () => {
     ["GET", "/box/balance", null, ["admin", "cashier", "supervisor"]],
     ["POST", "/box/transfer", { fromAccountId: 13, toAccountId: 14, amount: 1 }, ["admin"]],
     ["POST", "/expenses", { expenseDate: today(), category: "x", expenseCategoryId: 7, paidFromAccountId: 13, amount: 1, description: "r" }, ["admin"]],
-    ["GET", "/customers", null, ["admin", "cashier", "supervisor"]],
+    ["GET", "/customers", null, ["admin", "cashier", "supervisor", "waiter"]],
     ["PUT", "/customers/1", { fullName: "شركة الأمل للمقاولات" }, ["admin", "supervisor"]],
     ["PATCH", "/inventory/1/adjust-stock", { quantity: 0, transactionType: "adjustment", notes: "r" }, ["admin", "storage"]],
     ["PUT", "/kitchen-stock/set", { menuItemId: 1, quantity: 50 }, ["admin", "storage", "kitchen"]],

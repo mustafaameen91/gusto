@@ -1,19 +1,22 @@
-const { app, BrowserWindow, Menu, ipcMain } = require("electron");
+const { app, BrowserWindow, Menu, ipcMain, dialog } = require("electron");
 const path = require("path");
 const fs = require("fs");
+const settingsStore = require("./printing/config");
+const printing = require("./printing");
 
 // Performance: disable GPU on old hardware to prevent crashes, use software rendering
 app.disableHardwareAcceleration();
 app.commandLine.appendSwitch("disable-gpu-compositing");
 app.commandLine.appendSwitch("disable-software-rasterizer");
 
-// Development or production URL
 const isDev = process.argv.includes("--dev");
-// TODO: set the restaurant's production URL (or pass GUSTO_URL) before building a release
-const FRONTEND_URL = isDev ? "http://localhost:8080" : process.env.GUSTO_URL || "https://gusto.example.com";
+// The server address is set on each POS from "إعدادات الخادم والطابعات" (saved on the machine),
+// default https://gusto.codility.tech. GUSTO_URL overrides it; --dev always uses the local dev server.
+const frontendUrl = () => process.env.GUSTO_URL || (isDev ? "http://localhost:8081" : settingsStore.load().serverUrl || "");
 
 let mainWindow;
 let customerWindow;
+let settingsWindow;
 
 // Pre-load logo files as base64 at startup
 const logos = {};
@@ -48,11 +51,40 @@ function createWindow() {
     show: false, // Don't show until ready
   });
 
-  // Load the app
+  loadApp();
+
+  // Show window when ready
+  mainWindow.once("ready-to-show", () => {
+    mainWindow.show();
+    mainWindow.maximize();
+  });
+
+  // Open DevTools in development mode
+  if (isDev) {
+    mainWindow.webContents.openDevTools();
+  }
+
+  // Handle window closed
+  mainWindow.on("closed", () => {
+    mainWindow = null;
+  });
+
+  // Create application menu
+  createMenu();
+}
+
+// Load the restaurant system, or the connection page when it can't be reached / isn't set yet
+function loadApp() {
+  const url = frontendUrl();
+  if (!url) {
+    mainWindow.loadFile(path.join(__dirname, "error.html"), { query: { url: "" } });
+    openSettingsWindow();
+    return;
+  }
   mainWindow
-    .loadURL(FRONTEND_URL)
+    .loadURL(url)
     .then(() => {
-      console.log("✅ Loaded frontend URL:", FRONTEND_URL);
+      console.log("✅ Loaded frontend URL:", url);
       // Inject local logos so the frontend never fetches them from the server
       if (logos.logoPng) {
         mainWindow.webContents
@@ -83,27 +115,26 @@ function createWindow() {
     })
     .catch((err) => {
       console.error("❌ Failed to load URL:", err);
-      mainWindow.loadFile(path.join(__dirname, "error.html"));
+      mainWindow.loadFile(path.join(__dirname, "error.html"), { query: { url } });
     });
+}
 
-  // Show window when ready
-  mainWindow.once("ready-to-show", () => {
-    mainWindow.show();
-    mainWindow.maximize();
+function openSettingsWindow() {
+  if (settingsWindow && !settingsWindow.isDestroyed()) return settingsWindow.focus();
+  settingsWindow = new BrowserWindow({
+    width: 1180,
+    height: 860,
+    minWidth: 760,
+    minHeight: 600,
+    title: "إعدادات الطابعات والخادم",
+    icon: path.join(__dirname, "assets", "icon.png"),
+    parent: mainWindow || undefined,
+    backgroundColor: "#f5f2ed",
+    autoHideMenuBar: true,
+    webPreferences: { nodeIntegration: false, contextIsolation: true, preload: path.join(__dirname, "preload-settings.js") },
   });
-
-  // Open DevTools in development mode
-  if (isDev) {
-    mainWindow.webContents.openDevTools();
-  }
-
-  // Handle window closed
-  mainWindow.on("closed", () => {
-    mainWindow = null;
-  });
-
-  // Create application menu
-  createMenu();
+  settingsWindow.loadFile(path.join(__dirname, "printer-settings.html"));
+  settingsWindow.on("closed", () => (settingsWindow = null));
 }
 
 function createCustomerWindow() {
@@ -185,11 +216,114 @@ function setupCustomerDisplayHandlers() {
   });
 }
 
+// ---- "الطابعات" / "الخادم" menu actions: test everything on the POS itself ----
+const showResult = (title, message, detail, ok = true) =>
+  dialog.showMessageBox(mainWindow || undefined, { type: ok ? "info" : "error", title, message, detail, buttons: ["حسناً"] });
+
+const systemPrinterNames = async () => {
+  const wc = (mainWindow || settingsWindow)?.webContents;
+  try {
+    return wc ? (await wc.getPrintersAsync()).map((p) => p.name) : [];
+  } catch (_) {
+    return [];
+  }
+};
+
+async function serverGet(pathName, timeoutMs = 6000) {
+  const base = frontendUrl();
+  if (!base) throw new Error("لم يُضبط عنوان الخادم في الإعدادات");
+  const res = await fetch(base.replace(/\/+$/, "") + pathName, { signal: AbortSignal.timeout(timeoutMs) });
+  if (!res.ok) throw new Error(`الخادم أجاب بالرمز ${res.status}`);
+  return res.json();
+}
+
+const statusLine = (r) => `${r.status === "printed" ? "✓" : r.status === "skipped" ? "–" : "✗"} ${r.name}: ${r.status === "printed" ? "طُبعت" : r.status === "skipped" ? "لا أصناف لها في هذا الطلب" : r.error}`;
+
+async function menuCheckPrinters() {
+  const results = await printing.checkPrinters(await systemPrinterNames());
+  const lines = results.map((r) => `${r.ok === null ? "–" : r.ok ? "✓" : "✗"} ${r.name}: ${r.ok === null ? r.detail : r.ok ? "متصلة — " + r.detail : r.detail}`);
+  const bad = results.filter((r) => r.ok === false).length;
+  showResult("فحص الطابعات", bad ? `${bad} طابعة غير متصلة` : "كل الطابعات المفعّلة متصلة", lines.join("\n") + "\n\n(فحص الاتصال لا يطبع شيئاً)", !bad);
+}
+
+async function menuSampleOrder() {
+  let categories = [];
+  try {
+    categories = await serverGet("/api/categories", 4000);
+  } catch (_) {}
+  const results = await printing.printSampleOrder(Array.isArray(categories) ? categories : []);
+  const bad = results.filter((r) => r.status === "failed").length;
+  showResult(
+    "طلب تجريبي",
+    results.length ? (bad ? `فشلت ${bad} طابعة` : "أُرسل الطلب التجريبي إلى كل الطابعات في نفس الوقت") : "لا توجد طابعات مفعّلة",
+    results.map(statusLine).join("\n") + "\n\nتأكد أن الأوراق خرجت فعلاً من كل طابعة. الدرج لا يُفتح في التجربة.",
+    !bad && results.length > 0,
+  );
+}
+
+async function menuTestPage(printer) {
+  try {
+    await printing.testPrinter(printer);
+    showResult("طباعة تجريبية", `أُرسلت صفحة تجريبية إلى «${printer.name}»`, "تأكد أنها خرجت من الطابعة وأن الحروف العربية واضحة ومتصلة.");
+  } catch (e) {
+    showResult("طباعة تجريبية", `لم تُطبع على «${printer.name}»`, e.message, false);
+  }
+}
+
+async function menuOpenDrawer() {
+  try {
+    await printing.openDrawer();
+  } catch (e) {
+    showResult("درج النقود", "تعذّر فتح الدرج", e.message, false);
+  }
+}
+
+async function menuCheckServer() {
+  const url = frontendUrl();
+  const t = Date.now();
+  try {
+    await serverGet("/api/health");
+    showResult("فحص الخادم", "الخادم يعمل ✓", `${url}\nزمن الاستجابة: ${Date.now() - t} ms`);
+  } catch (e) {
+    showResult("فحص الخادم", "تعذّر الوصول إلى الخادم", `${url || "(لا يوجد عنوان)"}\n${e.name === "TimeoutError" ? "الخادم لا يرد" : e.message}`, false);
+  }
+}
+
 function createMenu() {
+  const { printers } = settingsStore.load();
+  const enabled = printers.filter((p) => p.enabled);
   const template = [
     {
       label: "ملف",
-      submenu: [{ role: "quit", label: "خروج" }],
+      submenu: [
+        { label: "إعدادات الطابعات والخادم", accelerator: "CmdOrCtrl+,", click: () => openSettingsWindow() },
+        { type: "separator" },
+        { role: "quit", label: "خروج" },
+      ],
+    },
+    {
+      label: "الطابعات",
+      submenu: [
+        { label: "فحص اتصال كل الطابعات", click: () => menuCheckPrinters() },
+        { label: "طلب تجريبي على كل الطابعات معاً", click: () => menuSampleOrder() },
+        { type: "separator" },
+        ...(enabled.length
+          ? enabled.map((p) => ({ label: `صفحة تجريبية — ${p.name}`, click: () => menuTestPage(p) }))
+          : [{ label: "لا توجد طابعات مفعّلة", enabled: false }]),
+        { type: "separator" },
+        { label: "فتح درج النقود", accelerator: "CmdOrCtrl+D", click: () => menuOpenDrawer() },
+        { type: "separator" },
+        { label: "إعدادات الطابعات…", click: () => openSettingsWindow() },
+      ],
+    },
+    {
+      label: "الخادم",
+      submenu: [
+        { label: "فحص الاتصال بالخادم", click: () => menuCheckServer() },
+        { label: "إعادة تحميل النظام", accelerator: "F5", click: () => mainWindow && loadApp() },
+        { type: "separator" },
+        { label: "تغيير عنوان الخادم…", click: () => openSettingsWindow() },
+      ],
     },
     {
       label: "عرض",
@@ -236,195 +370,128 @@ function createMenu() {
   Menu.setApplicationMenu(menu);
 }
 
-// Build receipt HTML from old-format data (fallback when frontend sends content instead of html)
-function buildReceiptFromContent(content) {
-  const logoDataUrl = logos.logoPng || logos.iconPng || "";
-  const paymentLabel = content.orderType === "card" ? "Card" : "Cash";
-  const dateStr = content.date || new Date().toLocaleString("ar-EG");
-
-  const itemsHtml = (content.items || [])
-    .map((item) => {
-      const name = item.name || "Item";
-      const qty = item.quantity || 1;
-      const lineTotal = (item.price || 0).toLocaleString();
-      return `<div class="item-row">
-      <span class="item-name">${name}</span>
-      <span class="item-dots"></span>
-      <span class="item-price">${lineTotal} IQD</span>
-    </div>
-    <div class="item-qty">x${qty}</div>`;
-    })
-    .join("");
-
-  const orderNote = content.notes || content.orderNotes;
-
-  // Calculate final total — items sum minus discount (overrides any wrong total from frontend)
-  const itemsSum = (content.items || []).reduce((s, i) => s + (Number(i.price) || 0), 0);
-  const discountAmount = Number(content.discount) || 0;
-  const subtotal = itemsSum;
-  const finalTotal = Math.max(0, subtotal - discountAmount);
-
-  return `<!DOCTYPE html>
-<html dir="rtl" lang="ar">
-<head><meta charset="UTF-8">
-<style>
-  @page { margin: 2mm 3mm; size: 72mm auto; }
-  * { margin: 0; padding: 0; box-sizing: border-box; }
-  body { font-family: 'Segoe UI','Tahoma','Arial',sans-serif; font-size: 12px; width: 66mm; margin: 0 auto; padding: 2mm 0; color: #000; direction: rtl; -webkit-print-color-adjust: exact; }
-  .header { text-align: center; padding-bottom: 8px; }
-  .header img { width: 64px; height: 64px; border-radius: 50%; object-fit: cover; margin-bottom: 4px; filter: invert(1) contrast(1.5); }
-  .header .stars { font-size: 14px; letter-spacing: 4px; margin: 2px 0; font-weight: bold; color: #000; }
-  .header .cafe-name { font-size: 14px; font-weight: bold; margin: 2px 0; color: #000; }
-  .header .cafe-name-en { font-size: 12px; font-weight: bold; color: #000; }
-  .divider { border: none; border-top: 1px solid #000; margin: 6px 0; }
-  .info { font-size: 11px; line-height: 1.6; padding: 2px 0; color: #000; }
-  .item-row { display: flex; align-items: baseline; font-size: 12px; margin-top: 6px; }
-  .item-name { flex-shrink: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #000; }
-  .item-dots { flex: 1; border-bottom: 1px dotted #000; margin: 0 4px; min-width: 8px; position: relative; top: -3px; }
-  .item-price { flex-shrink: 0; font-weight: bold; white-space: nowrap; color: #000; }
-  .item-qty { font-size: 10px; color: #000; margin-bottom: 2px; }
-  .order-notes-box { font-size: 11px; color: #000; font-style: italic; text-align: center; padding: 6px 8px; margin: 6px 0; border: 1px dashed #000; background: #f5f5f5; }
-  .total-section { text-align: center; padding: 8px 0; }
-  .total-label { font-size: 18px; font-weight: bold; color: #000; }
-  .footer { text-align: center; padding-top: 4px; font-size: 12px; line-height: 1.6; color: #000; }
-  .footer .thank { font-weight: bold; font-size: 13px; }
-</style></head>
-<body>
-  <div class="header">
-    ${logoDataUrl ? `<img src="${logoDataUrl}" alt="Logo">` : ""}
-    <div class="stars">***</div>
-    <div class="cafe-name">مطعم جوستو</div>
-    <div class="cafe-name-en">Gusto Restaurant</div>
-  </div>
-  <hr class="divider">
-  <div class="info">
-    <div>رقم الطلب: <strong>${content.orderNumber || "---"}</strong></div>
-    <div>التاريخ: ${dateStr}</div>
-    ${content.table ? `<div>الطاولة: ${content.table}</div>` : ""}
-    <div>الدفع: ${paymentLabel}</div>
-  </div>
-  <hr class="divider">
-  ${itemsHtml}
-  <hr class="divider">
-  ${
-    discountAmount > 0
-      ? `
-  <div style="display:flex;justify-content:space-between;font-size:11px;padding:2px 0;">
-    <span>المجموع الفرعي</span><span>${subtotal.toLocaleString()} IQD</span>
-  </div>
-  <div style="display:flex;justify-content:space-between;font-size:11px;padding:2px 0;">
-    <span>الخصم</span><span>-${discountAmount.toLocaleString()} IQD</span>
-  </div><hr class="divider">`
-      : ""
-  }
-  <div class="total-section">
-    <div class="total-label">المجموع: ${finalTotal.toLocaleString()} IQD</div>
-  </div>
-  ${orderNote ? `<div class="order-notes-box">📝 ${orderNote}</div>` : ""}
-  <hr class="divider">
-  <div class="footer">
-    <div class="thank">!شكراً لزيارتكم</div>
-    <div>Thank You! Visit Again</div>
-  </div>
-</body></html>`;
+// Old-format data { content: {...} } → order shape for the receipt template
+function orderFromContent(c) {
+  const items = (c.items || []).map((i) => {
+    const quantity = Number(i.quantity) || 1;
+    const lineTotal = Number(i.price) || 0;
+    return { name: i.name, quantity, unitPrice: lineTotal / quantity, lineTotal, notes: i.notes };
+  });
+  const subtotal = items.reduce((s, i) => s + i.lineTotal, 0);
+  const discount = Number(c.discount) || 0;
+  return { orderNumber: c.orderNumber, table: c.table, orderType: c.orderType, saleType: c.saleType, notes: c.notes || c.orderNotes, items, subtotal, discount, total: c.total ?? Math.max(0, subtotal - discount) };
 }
 
-// Setup print handlers
 function setupPrintHandlers() {
-  // Accept both formats: { html: '...' } (new) or { type, content } (old)
-  ipcMain.handle("print-receipt", async (event, data) => {
-    return new Promise((resolve) => {
-      try {
-        // Support both old and new frontend formats
-        let html = data.html;
-        if (!html && data.content) {
-          html = buildReceiptFromContent(data.content);
-        }
-        if (!html) {
-          return resolve({ success: false, error: "No print data provided" });
-        }
-
-        console.log("🖨️ Print receipt request received");
-
-        const printWin = new BrowserWindow({
-          width: 400,
-          height: 900,
-          show: false,
-          webPreferences: { nodeIntegration: false, contextIsolation: true },
-        });
-
-        printWin.loadURL("data:text/html;charset=utf-8," + encodeURIComponent(html));
-
-        printWin.webContents.on("did-finish-load", () => {
-          printWin.webContents
-            .getPrintersAsync()
-            .then((printers) => {
-              console.log("🖨️ Available printers:", printers.map((p) => p.name).join(", "));
-
-              // Auto-detect POS/thermal printer
-              const posPrinter = printers.find((p) => /pos|thermal|receipt|stmicro|80mm|58mm/i.test(p.name)) || printers.find((p) => /usb/i.test(p.name));
-
-              const printerName = posPrinter ? posPrinter.name : undefined;
-              console.log("🖨️ Using printer:", printerName || "system default");
-
-              printWin.webContents.print(
-                {
-                  silent: true,
-                  printBackground: true,
-                  deviceName: printerName || "",
-                  margins: { marginType: "custom", top: 0, bottom: 0, left: 0, right: 0 },
-                  pageSize: { width: 72000, height: 200000 },
-                },
-                (success, errorType) => {
-                  printWin.close();
-                  if (success) {
-                    console.log("✅ Receipt printed successfully");
-                    resolve({ success: true, printer: printerName || "default" });
-                  } else {
-                    console.error("❌ Print failed:", errorType);
-                    resolve({ success: false, error: errorType || "Print failed" });
-                  }
-                },
-              );
-            })
-            .catch((err) => {
-              printWin.close();
-              console.error("❌ Error getting printers:", err);
-              resolve({ success: false, error: err.message });
-            });
-        });
-      } catch (error) {
-        console.error("❌ Print error:", error);
-        resolve({ success: false, error: error.message || "Printer error" });
-      }
-    });
+  // New: one order → cashier receipt + kitchen/grill tickets at the same time
+  ipcMain.handle("print-order", async (_event, order, opts) => {
+    try {
+      // A reprint never opens the drawer again
+      const results = await printing.printOrder(opts?.onlyIds ? { ...order, reprint: true } : order, opts || {});
+      return { success: results.every((r) => r.status !== "failed"), results };
+    } catch (e) {
+      console.error("❌ print-order:", e);
+      return { success: false, results: [], error: e.message };
+    }
   });
 
-  // Get list of printers
-  ipcMain.handle("get-printers", async () => {
+  ipcMain.handle("open-drawer", async () => {
     try {
-      const win = BrowserWindow.getAllWindows()[0];
-      if (!win) return [];
+      await printing.openDrawer();
+      return { success: true };
+    } catch (e) {
+      return { success: false, error: e.message };
+    }
+  });
 
-      const printers = await win.webContents.getPrintersAsync();
-      return printers.map((p) => ({
-        name: p.name,
-        displayName: p.displayName,
-        description: p.description,
-        status: p.status,
-        isDefault: p.isDefault,
-      }));
-    } catch (error) {
-      console.error("Error getting printers:", error);
+  // Older screens: { html } or { content } → the cashier (receipt) printer
+  ipcMain.handle("print-receipt", async (_event, data) => {
+    if (data?.html) return printing.printHtmlOnReceiptPrinter(data.html);
+    if (data?.content) {
+      const results = await printing.printOrder(orderFromContent(data.content), { onlyRoles: ["receipt"] });
+      const r = results[0];
+      return r && r.status === "printed" ? { success: true, printer: r.name } : { success: false, error: r?.error || "لا توجد طابعة" };
+    }
+    return { success: false, error: "No print data provided" };
+  });
+
+  ipcMain.handle("get-printers", async () => {
+    const s = settingsStore.load();
+    return s.printers.map((p) => ({ id: p.id, name: p.name, enabled: p.enabled, role: p.role, connection: p.connection }));
+  });
+
+  ipcMain.on("open-printer-settings", () => openSettingsWindow());
+  ipcMain.on("retry-connection", () => mainWindow && loadApp());
+
+  // ----- settings window -----
+  ipcMain.handle("settings:load", () => settingsStore.load());
+  ipcMain.handle("settings:save", (_e, s) => {
+    try {
+      const before = frontendUrl();
+      settingsStore.save(s);
+      createMenu();
+      const reloaded = !!mainWindow && frontendUrl() !== before;
+      if (reloaded) loadApp();
+      return { success: true, reloaded };
+    } catch (e) {
+      return { success: false, error: e.message };
+    }
+  });
+  ipcMain.handle("settings:system-printers", async () => {
+    const wc = (settingsWindow || mainWindow)?.webContents;
+    if (!wc) return [];
+    try {
+      return (await wc.getPrintersAsync()).map((p) => ({ name: p.name, isDefault: p.isDefault }));
+    } catch (_) {
       return [];
     }
   });
+  const apiFetch = async (base, pathName) => {
+    const url = String(base || "").trim().replace(/\/+$/, "");
+    if (!/^https?:\/\//.test(url)) throw new Error("العنوان يجب أن يبدأ بـ http:// أو https://");
+    const res = await fetch(url + pathName, { signal: AbortSignal.timeout(6000) });
+    if (!res.ok) throw new Error(`الخادم أجاب بالرمز ${res.status}`);
+    return res.json();
+  };
+  ipcMain.handle("settings:check-server", async (_e, base) => {
+    try {
+      await apiFetch(base, "/api/health");
+      return { success: true };
+    } catch (e) {
+      return { success: false, error: e.name === "TimeoutError" ? "الخادم لا يرد" : e.cause?.code === "ENOTFOUND" ? "العنوان غير موجود" : e.message };
+    }
+  });
+  ipcMain.handle("settings:categories", async (_e, base) => {
+    try {
+      const data = await apiFetch(base, "/api/categories");
+      return { success: true, data: (Array.isArray(data) ? data : []).filter((c) => c.isActive !== 0 && c.isActive !== false) };
+    } catch (e) {
+      return { success: false, error: e.message };
+    }
+  });
+  ipcMain.handle("settings:test-printer", async (_e, p) => {
+    try {
+      await printing.testPrinter(p);
+      return { success: true };
+    } catch (e) {
+      return { success: false, error: e.message };
+    }
+  });
+  ipcMain.handle("settings:open-drawer", async (_e, p) => {
+    try {
+      await printing.openDrawer(p);
+      return { success: true };
+    } catch (e) {
+      return { success: false, error: e.message };
+    }
+  });
+  ipcMain.handle("settings:close", () => settingsWindow?.close());
 }
 
 // App lifecycle
 app.whenReady().then(() => {
   console.log("🚀 Starting Gusto Restaurant Electron App...");
-  console.log("📡 Frontend URL:", FRONTEND_URL);
+  console.log("📡 Frontend URL:", frontendUrl() || "(not set — opening settings)");
   console.log("🔧 Dev Mode:", isDev);
 
   setupCustomerDisplayHandlers();

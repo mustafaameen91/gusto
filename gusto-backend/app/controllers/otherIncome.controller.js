@@ -1,5 +1,5 @@
 const OtherIncome = require("../models/otherIncome.model");
-const { todayBusinessDate, businessWindow } = require("../services/businessDay");
+const { todayBusinessDate, businessWindow, localDateTime } = require("../services/businessDay");
 const PostingSettings = require("../models/postingSettings.model");
 const db = require("../models/db");
 
@@ -33,7 +33,7 @@ function postStandaloneOtherIncome(otherIncomeRecord, userId, cb) {
     const memo = `إيراد خارجي${notes ? `: ${notes}` : ""}`.trim();
     const entryDate = incomeDate
       ? `${String(incomeDate).slice(0, 10)} 12:00:00`
-      : new Date().toISOString().slice(0, 19).replace("T", " ");
+      : localDateTime();
 
     db.query(
       `INSERT INTO JournalEntries (entryDate, sourceType, status, memo, createdBy)

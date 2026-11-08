@@ -312,13 +312,14 @@
           </div>
           
           <v-row>
-            <v-col cols="12" md="6" v-if="!editingItem">
+            <v-col cols="12" md="6">
               <v-text-field
                 v-model="staffForm.password"
-                label="كلمة المرور"
+                :label="editingItem ? 'كلمة مرور جديدة (اتركها فارغة للإبقاء على الحالية)' : 'كلمة المرور'"
                 type="password"
+                autocomplete="new-password"
                 variant="outlined"
-                :rules="[rules.required]"
+                :rules="editingItem ? [] : [rules.required]"
                 density="comfortable"
                 color="#046375"
               />
@@ -416,7 +417,8 @@ import {
   PhUserPlus, PhDotsThreeVertical, PhDownload, PhPrinter, PhArrowClockwise,
   PhUserCirclePlus, PhUserCircleGear, PhX, PhFloppyDisk
 } from '@phosphor-icons/vue'
-import { formatDate } from '@/utils/dateFormatter'
+import { formatDate, todayBusinessDate, dateInputValue } from '@/utils/dateFormatter'
+import { ROLE_LABELS } from '@/config/navigation'
 import { useAuthStore } from '@/stores/auth'
 import { formatCurrentDateArabic } from '@/utils/dateFormatter'
 import logoImg from '@/assets/logo.png'
@@ -443,21 +445,13 @@ const staffForm = ref({
   phone: '',
   password: '',
   role: 'cashier',
-  hireDate: new Date().toISOString().split('T')[0],
+  hireDate: todayBusinessDate(),
   salary: 0,
   isActive: true
 })
 
-const roles = [
-  { value: 'admin', title: 'أدمن' },
-  { value: 'cashier', title: 'كاشير' },
-  { value: 'kitchen', title: 'مطبخ' },
-  { value: 'waiter', title: 'نادل' },
-  { value: 'supervisor', title: 'مسؤول' },
-  { value: 'bartender', title: 'البار' },
-  { value: 'purchases', title: 'مشتريات' },
-  { value: 'storage', title: 'مخزون' },
-]
+// Same roles and names as the sidebar (config/navigation.js) and the database
+const roles = Object.entries(ROLE_LABELS).map(([value, title]) => ({ value, title }))
 
 const headers = [
   { title: 'الاسم', key: 'fullName', align: 'start' },
@@ -496,18 +490,7 @@ const getRoleColor = (role) => {
   return colors[role] || 'grey'
 }
 
-const getRoleText = (role) => {
-  const texts = {
-    admin: 'أدمن',
-    supervisor: 'مشرف',
-    cashier: 'كاشير',
-    kitchen: 'مطبخ',
-    waiter: 'نادل',
-    purchases: 'مشتريات',
-    storage: 'مخزون'
-  }
-  return texts[role] || role
-}
+const getRoleText = (role) => ROLE_LABELS[role] || role
 
 // formatDate is now imported from utils/dateFormatter.js
 
@@ -526,8 +509,7 @@ const loadStaff = async () => {
 
 const editStaff = (item) => {
   editingItem.value = item
-  staffForm.value = { ...item }
-  delete staffForm.value.password // Don't edit password here
+  staffForm.value = { ...item, hireDate: dateInputValue(item.hireDate), password: '' }
   showAddDialog.value = true
 }
 
@@ -540,8 +522,14 @@ const saveStaff = async () => {
   saving.value = true
   try {
     if (editingItem.value) {
-      await staffAPI.update(editingItem.value.idStaff, staffForm.value)
-      toast.success('تم تحديث الموظف')
+      if (staffForm.value.password && staffForm.value.password.length < 6) {
+        toast.error('كلمة المرور يجب أن تكون 6 أحرف على الأقل')
+        saving.value = false
+        return
+      }
+      const { password, ...fields } = staffForm.value
+      await staffAPI.update(editingItem.value.idStaff, password ? { ...fields, password } : fields)
+      toast.success(password ? 'تم تحديث الموظف وتغيير كلمة المرور' : 'تم تحديث الموظف')
     } else {
       if (!staffForm.value.password) {
         toast.error('كلمة المرور مطلوبة للموظف الجديد')
@@ -563,14 +551,14 @@ const saveStaff = async () => {
 }
 
 const deleteStaff = async (item) => {
-  if (!confirm(`حذف "${item.fullName}"?`)) return
+  if (!confirm(`حذف "${item.fullName}"؟ إن كانت له سجلات في النظام سيتم تعطيل حسابه بدلاً من حذفه.`)) return
 
   try {
-    await staffAPI.delete(item.idStaff)
-    toast.success('تم حذف الموظف')
+    const res = await staffAPI.delete(item.idStaff)
+    toast.success(res.data?.deactivated ? res.data.message : 'تم حذف الموظف')
     await loadStaff()
   } catch (error) {
-    toast.error('فشل حذف الموظف')
+    toast.error(error.response?.data?.message || 'فشل حذف الموظف')
     console.error(error)
   }
 }
@@ -582,7 +570,7 @@ const resetForm = () => {
     phone: '',
     password: '',
     role: 'cashier',
-    hireDate: new Date().toISOString().split('T')[0],
+    hireDate: todayBusinessDate(),
     salary: 0,
     isActive: true
   }

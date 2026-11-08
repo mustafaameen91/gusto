@@ -132,6 +132,7 @@
                         variant="text"
                         color="primary"
                         @click="viewPurchase(item)"
+                        aria-label="عرض التفاصيل"
                       >
                         <PhEye :size="20" weight="bold" />
                       </v-btn>
@@ -151,6 +152,7 @@
                         variant="text"
                         color="success"
                         @click="openReceiveDialog(item)"
+                        aria-label="استلام"
                       >
                         <PhCheckCircle :size="20" weight="bold" />
                       </v-btn>
@@ -166,6 +168,7 @@
                         variant="text"
                         color="secondary"
                         @click="printPurchase(item)"
+                        aria-label="طباعة"
                       >
                         <PhPrinter :size="20" weight="bold" />
                       </v-btn>
@@ -587,7 +590,7 @@ const confirmReceive = async () => {
     closeReceiveDialog()
   } catch (error) {
     console.error('❌ Receive error:', error)
-    toast.error('فشل تأكيد الاستلام')
+    toast.error(error.response?.data?.message || 'فشل تأكيد الاستلام')
   } finally {
     saving.value = false
   }
@@ -618,14 +621,21 @@ const printPurchase = async (purchase) => {
     }
   }
 
-  // Generate items HTML
+  const escapeHtml = (v) => String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]))
+  const supplierName = fullPurchase.supplierName || purchase.supplierName || 'غير محدد'
+  const receivedValue = (item) => Number(item.receivedQuantity || 0) * Number(item.unitPrice || 0)
+  const totalReceivedValue = fullPurchase.items.reduce((sum, item) => sum + receivedValue(item), 0)
+  const receivedLines = fullPurchase.items.filter(item => Number(item.receivedQuantity || 0) > 0).length
+
+  // Generate items HTML (received quantities and values)
   const itemsHtml = fullPurchase.items.map(item => 
     '<tr>' +
-      '<td>' + item.ingredientName + '</td>' +
-      '<td>' + item.unit + '</td>' +
-      '<td>' + item.orderedQuantity + '</td>' +
-      '<td>' + Number(item.unitPrice).toLocaleString() + ' د.ع</td>' +
-      '<td><strong>' + (item.orderedQuantity * item.unitPrice).toLocaleString() + ' د.ع</strong></td>' +
+      '<td>' + escapeHtml(item.ingredientName) + '</td>' +
+      '<td>' + escapeHtml(item.unit) + '</td>' +
+      '<td>' + escapeHtml(item.orderedQuantity) + '</td>' +
+      '<td><strong>' + escapeHtml(Number(item.receivedQuantity || 0)) + '</strong></td>' +
+      '<td>' + Number(item.unitPrice || 0).toLocaleString() + ' د.ع</td>' +
+      '<td><strong>' + receivedValue(item).toLocaleString() + ' د.ع</strong></td>' +
     '</tr>'
   ).join('')
 
@@ -633,11 +643,9 @@ const printPurchase = async (purchase) => {
   const notesHtml = fullPurchase.notes ? 
     '<div class="notes-section">' +
       '<h4>📝 ملاحظات:</h4>' +
-      '<div class="notes-content">' + fullPurchase.notes + '</div>' +
+      '<div class="notes-content">' + escapeHtml(fullPurchase.notes) + '</div>' +
     '</div>' : ''
 
-  // Calculate totals
-  const totalQuantity = fullPurchase.items.reduce((sum, item) => sum + parseFloat(item.orderedQuantity), 0)
   const statusClass = fullPurchase.status === 'received' ? 'received' : 
                       fullPurchase.status === 'partially_received' ? 'partial' : 'pending'
 
@@ -943,7 +951,7 @@ const printPurchase = async (purchase) => {
 '<html dir="rtl" lang="ar">' +
 '<head>' +
 '  <meta charset="UTF-8">' +
-'  <title>أمر شراء - ' + fullPurchase.purchaseNumber + '</title>' +
+'  <title>إيصال استلام - ' + escapeHtml(fullPurchase.purchaseNumber) + '</title>' +
 '  <style>' + cssStyles + '</style>' +
 '</head>' +
 '<body>' +
@@ -955,16 +963,20 @@ const printPurchase = async (purchase) => {
 '      </div>' +
 '      <div class="company-name">مطعم جوستو</div>' +
 '      <div class="company-tagline">Gusto Restaurant</div>' +
-'      <div class="document-title">أمر شراء - Purchase Order</div>' +
+'      <div class="document-title">إيصال استلام - Goods Received Note</div>' +
 '    </div>'
     +
 '    <!-- Info Section -->' +
 '    <div class="info-section">' +
 '      <div class="info-box" style="max-width: 600px; margin: 0 auto;">' +
-'        <h3>📋 معلومات أمر الشراء</h3>' +
+'        <h3>📋 معلومات الاستلام</h3>' +
 '        <div class="info-row">' +
 '          <span class="info-label">رقم الأمر:</span>' +
-'          <span class="info-value purchase-number">' + fullPurchase.purchaseNumber + '</span>' +
+'          <span class="info-value purchase-number">' + escapeHtml(fullPurchase.purchaseNumber) + '</span>' +
+'        </div>' +
+'        <div class="info-row">' +
+'          <span class="info-label">المورد:</span>' +
+'          <span class="info-value">' + escapeHtml(supplierName) + '</span>' +
 '        </div>' +
 '        <div class="info-row">' +
 '          <span class="info-label">تاريخ الطلب:</span>' +
@@ -974,20 +986,26 @@ const printPurchase = async (purchase) => {
 '          <span class="info-label">تاريخ التسليم المتوقع:</span>' +
 '          <span class="info-value">' + (fullPurchase.expectedDeliveryDate ? formatDateShort(fullPurchase.expectedDeliveryDate) : 'غير محدد') + '</span>' +
 '        </div>' +
+(fullPurchase.receivedByName ?
+'        <div class="info-row">' +
+'          <span class="info-label">المستلم:</span>' +
+'          <span class="info-value">' + escapeHtml(fullPurchase.receivedByName) + '</span>' +
+'        </div>' : '') +
 '      </div>' +
 '    </div>'
     +
 '    <!-- Items Section -->' +
 '    <div class="items-section">' +
-'      <h3>📦 الأصناف المطلوبة</h3>' +
+'      <h3>📦 الأصناف المستلمة</h3>' +
 '      <table>' +
 '        <thead>' +
 '          <tr>' +
 '            <th>اسم الصنف</th>' +
 '            <th>الوحدة</th>' +
 '            <th>الكمية المطلوبة</th>' +
+'            <th>الكمية المستلمة</th>' +
 '            <th>سعر الوحدة</th>' +
-'            <th>المجموع</th>' +
+'            <th>قيمة المستلم</th>' +
 '          </tr>' +
 '        </thead>' +
 '        <tbody>' +
@@ -999,16 +1017,16 @@ const printPurchase = async (purchase) => {
 '    <!-- Totals Section -->' +
 '    <div class="totals-section">' +
 '      <div class="total-row">' +
-'        <span class="total-label">عدد الأصناف:</span>' +
-'        <span class="total-amount">' + fullPurchase.items.length + ' صنف</span>' +
+'        <span class="total-label">عدد الأصناف المستلمة:</span>' +
+'        <span class="total-amount">' + receivedLines + ' من ' + fullPurchase.items.length + ' صنف</span>' +
 '      </div>' +
 '      <div class="total-row">' +
-'        <span class="total-label">إجمالي الكمية:</span>' +
-'        <span class="total-amount">' + totalQuantity + ' وحدة</span>' +
+'        <span class="total-label">قيمة أمر الشراء:</span>' +
+'        <span class="total-amount">' + Number(fullPurchase.totalAmount || 0).toLocaleString() + ' د.ع</span>' +
 '      </div>' +
 '      <div class="total-row grand-total">' +
-'        <span class="total-label">💰 المبلغ الإجمالي:</span>' +
-'        <span class="total-amount">' + Number(fullPurchase.totalAmount).toLocaleString() + ' د.ع</span>' +
+'        <span class="total-label">💰 إجمالي قيمة المستلم:</span>' +
+'        <span class="total-amount">' + totalReceivedValue.toLocaleString() + ' د.ع</span>' +
 '      </div>' +
 '    </div>'
     +
@@ -1019,7 +1037,7 @@ const printPurchase = async (purchase) => {
 '      <div class="signatures">' +
 '        <div class="signature-box">' +
 '          <div class="signature-line">التوقيع</div>' +
-'          <div class="signature-label">المشتري</div>' +
+'          <div class="signature-label">المستلم</div>' +
 '        </div>' +
 '        <div class="signature-box">' +
 '          <div class="signature-line">التاريخ</div>' +

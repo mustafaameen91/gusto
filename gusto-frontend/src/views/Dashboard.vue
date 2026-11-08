@@ -76,10 +76,10 @@
                     من {{ ordersPagination.total }}
                   </span>
                   <div class="d-flex gap-1">
-                    <v-btn icon variant="text" size="x-small" :disabled="ordersPagination.page === 1 || loading.orders" @click="loadRecentOrders(ordersPagination.page - 1)">
+                    <v-btn icon variant="text" size="x-small" aria-label="الصفحة السابقة" title="الصفحة السابقة" :disabled="ordersPagination.page === 1 || loading.orders" @click="loadRecentOrders(ordersPagination.page - 1)">
                       <PhCaretRight :size="16" color="rgba(255,255,255,0.6)" />
                     </v-btn>
-                    <v-btn icon variant="text" size="x-small" :disabled="ordersPagination.page * ordersPagination.itemsPerPage >= ordersPagination.total || loading.orders" @click="loadRecentOrders(ordersPagination.page + 1)">
+                    <v-btn icon variant="text" size="x-small" aria-label="الصفحة التالية" title="الصفحة التالية" :disabled="ordersPagination.page * ordersPagination.itemsPerPage >= ordersPagination.total || loading.orders" @click="loadRecentOrders(ordersPagination.page + 1)">
                       <PhCaretLeft :size="16" color="rgba(255,255,255,0.6)" />
                     </v-btn>
                   </div>
@@ -207,7 +207,7 @@ import { useAuthStore } from '@/stores/auth'
 import AppLayout from '@/components/AppLayout.vue'
 import logoImg from '@/assets/logo.png'
 import { orderAPI, inventoryAPI, menuAPI, expenseAPI, purchaseAPI, boxAPI, reportAPI } from '@/services/api'
-import { formatDate, formatCurrentDateArabic } from '@/utils/dateFormatter'
+import { formatDate, formatCurrentDateArabic, todayBusinessDate, dateInputValue } from '@/utils/dateFormatter'
 import { PhCurrencyDollar, PhChefHat, PhForkKnife, PhPackage, PhChartLine, PhTrendUp, PhClockCountdown, PhCheckCircle, PhWarning, PhCheck, PhReceipt, PhShoppingCart, PhTrendDown, PhWallet, PhCaretLeft, PhCaretRight } from '@phosphor-icons/vue'
 
 const authStore = useAuthStore()
@@ -277,10 +277,10 @@ const loadRecentOrders = async (page = 1) => {
 
   loading.value.orders = true
   try {
-    const today = new Date().toISOString().split('T')[0]
+    const today = todayBusinessDate()
     const response = await orderAPI.getAll({
       page,
-      limit: ordersPagination.itemsPerPage,
+      limit: ordersPagination.value.itemsPerPage,
       status: 'pending,preparing,ready',
       date: today
     })
@@ -321,7 +321,7 @@ const loadDashboardData = async () => {
       
       await loadRecentOrders(1)
       
-      const today = new Date().toISOString().split('T')[0]
+      const today = todayBusinessDate()
       try {
         const summaryResponse = await orderAPI.getDailySummary(today)
         stats.value.todaySales = parseFloat(summaryResponse.data.totalSales) || 0
@@ -364,7 +364,7 @@ const loadDashboardData = async () => {
         stats.value.menuItems = 0
       }
 
-      const today = new Date().toISOString().split('T')[0]
+      const today = todayBusinessDate()
       try {
         const expenseResponse = await expenseAPI.getTotal({ startDate: today, endDate: today })
         stats.value.todayExpenses = parseFloat(expenseResponse.data.totalExpenses || 0)
@@ -377,7 +377,7 @@ const loadDashboardData = async () => {
         const purchaseResponse = await purchaseAPI.getAll()
         const todayPurchases = Array.isArray(purchaseResponse?.data) 
           ? purchaseResponse.data.filter(p => {
-              const purchaseDate = new Date(p.purchaseDate).toISOString().split('T')[0]
+              const purchaseDate = dateInputValue(p.purchaseDate)
               return purchaseDate === today && (p.status === 'received' || p.status === 'partially_received')
             })
           : []

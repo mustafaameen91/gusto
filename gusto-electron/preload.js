@@ -10,9 +10,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
     chrome: process.versions.chrome,
     electron: process.versions.electron
   },
-  // Printing functions
+  // Printing: one order → cashier receipt + kitchen/grill tickets (configured on this POS)
+  printOrder: (order, opts) => ipcRenderer.invoke('print-order', order, opts),
+  openDrawer: () => ipcRenderer.invoke('open-drawer'),
   printReceipt: (data) => ipcRenderer.invoke('print-receipt', data),
   getPrinters: () => ipcRenderer.invoke('get-printers'),
+  openPrinterSettings: () => ipcRenderer.send('open-printer-settings'),
+  retryConnection: () => ipcRenderer.send('retry-connection'),
   // Customer display functions
   updateCustomerDisplay: (data) => ipcRenderer.invoke('update-customer-display', data),
   showOrderOnDisplay: (data) => ipcRenderer.invoke('show-order-on-display', data)

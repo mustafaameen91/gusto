@@ -18,6 +18,8 @@
                   color="white"
                   @click="$router.push('/suppliers')"
                   class="ml-4"
+                  aria-label="العودة إلى الموردين"
+                  title="العودة إلى الموردين"
                 >
                   <PhArrowRight :size="24" weight="bold" />
                 </v-btn>
@@ -35,9 +37,9 @@
         </v-col>
       </v-row>
 
-      <!-- Stats Cards (4): Total debts, Total paid, Services, Remaining. Remaining = Total debts − Total paid -->
+      <!-- Stats Cards: Remaining = Total debts − Paid − Credits − Transfers out -->
       <v-row class="mb-4">
-        <v-col cols="12" sm="6" lg="3">
+        <v-col cols="12" sm="6" lg="4">
           <v-card
             elevation="0"
             style="background: var(--t-surface); border: 1px solid var(--t-border); border-radius: 12px;"
@@ -51,13 +53,13 @@
             <p class="text-body-2 mb-2" style="color: var(--t-text-dim); font-weight: 500;">
               مجموع الديون
             </p>
-            <p class="text-caption mb-1" style="color: var(--t-text-faint);">أول المدة + أوامر شراء + خدمات</p>
+            <p class="text-caption mb-1" style="color: var(--t-text-faint);">أول المدة + مشتريات + خدمات + تحويلات واردة</p>
             <h2 class="text-h4 font-weight-bold mb-1" style="color: var(--t-text);">
               {{ Number(totalDebts || 0).toLocaleString() }} د.ع
             </h2>
           </v-card>
         </v-col>
-        <v-col cols="12" sm="6" lg="3">
+        <v-col cols="12" sm="6" lg="4">
           <v-card
             elevation="0"
             style="background: var(--t-surface); border: 1px solid var(--t-border); border-radius: 12px;"
@@ -71,13 +73,53 @@
             <p class="text-body-2 mb-2" style="color: var(--t-text-dim); font-weight: 500;">
               مجموع المسدد
             </p>
-            <p class="text-caption mb-1" style="color: var(--t-text-faint);">مصروفات (دفعات) للمورد</p>
+            <p class="text-caption mb-1" style="color: var(--t-text-faint);">دفعات + مصروفات للمورد</p>
             <h2 class="text-h4 font-weight-bold mb-1" style="color: var(--t-text);">
               {{ Number(profile?.totalPayments || 0).toLocaleString() }} د.ع
             </h2>
           </v-card>
         </v-col>
-        <v-col cols="12" sm="6" lg="3">
+        <v-col cols="12" sm="6" lg="4">
+          <v-card
+            elevation="0"
+            style="background: var(--t-surface); border: 1px solid var(--t-border); border-radius: 12px;"
+            class="pa-5"
+          >
+            <div class="d-flex align-center justify-space-between mb-4">
+              <div style="width: 48px; height: 48px; border-radius: 10px; background: #D4A574; display: flex; align-items: center; justify-content: center;">
+                <PhArrowUUpLeft :size="24" weight="duotone" color="white" />
+              </div>
+            </div>
+            <p class="text-body-2 mb-2" style="color: var(--t-text-dim); font-weight: 500;">
+              مرتجعات / إشعارات دائنة
+            </p>
+            <p class="text-caption mb-1" style="color: var(--t-text-faint);">مرتجعات مشتريات وإشعارات دائنة من المورد</p>
+            <h2 class="text-h4 font-weight-bold mb-1" style="color: var(--t-text);">
+              {{ Number(profile?.totalCredits || 0).toLocaleString() }} د.ع
+            </h2>
+          </v-card>
+        </v-col>
+        <v-col cols="12" sm="6" lg="4">
+          <v-card
+            elevation="0"
+            style="background: var(--t-surface); border: 1px solid var(--t-border); border-radius: 12px;"
+            class="pa-5"
+          >
+            <div class="d-flex align-center justify-space-between mb-4">
+              <div style="width: 48px; height: 48px; border-radius: 10px; background: #046375; display: flex; align-items: center; justify-content: center;">
+                <PhArrowsLeftRight :size="24" weight="duotone" color="white" />
+              </div>
+            </div>
+            <p class="text-body-2 mb-2" style="color: var(--t-text-dim); font-weight: 500;">
+              تحويلات صادرة
+            </p>
+            <p class="text-caption mb-1" style="color: var(--t-text-faint);">ديون محوّلة من هذا المورد إلى مورد آخر</p>
+            <h2 class="text-h4 font-weight-bold mb-1" style="color: var(--t-text);">
+              {{ Number(profile?.transferOut || 0).toLocaleString() }} د.ع
+            </h2>
+          </v-card>
+        </v-col>
+        <v-col cols="12" sm="6" lg="4">
           <v-card
             elevation="0"
             style="background: var(--t-surface); border: 1px solid var(--t-border); border-radius: 12px;"
@@ -91,13 +133,13 @@
             <p class="text-body-2 mb-2" style="color: var(--t-text-dim); font-weight: 500;">
               الخدمات
             </p>
-            <p class="text-caption mb-1" style="color: var(--t-text-faint);">ما علينا من فواتير الخدمات</p>
+            <p class="text-caption mb-1" style="color: var(--t-text-faint);">ما علينا من فواتير الخدمات (ضمن مجموع الديون)</p>
             <h2 class="text-h4 font-weight-bold mb-1" style="color: var(--t-text);">
               {{ Number(profile?.totalServiceDebt || 0).toLocaleString() }} د.ع
             </h2>
           </v-card>
         </v-col>
-        <v-col cols="12" sm="6" lg="3">
+        <v-col cols="12" sm="6" lg="4">
           <v-card
             elevation="0"
             style="background: var(--t-surface); border: 1px solid var(--t-border); border-radius: 12px;"
@@ -111,8 +153,8 @@
             <p class="text-body-2 mb-2" style="color: var(--t-text-dim); font-weight: 500;">
               المتبقي
             </p>
-            <p class="text-caption mb-1" style="color: var(--t-text-faint);">(مجموع الديون يشمل الخدمات) − مجموع المسدد</p>
-            <h2 class="text-h4 font-weight-bold mb-1" :style="{ color: (remaining || 0) >= 0 ? '#111827' : '#10B981' }">
+            <p class="text-caption mb-1" style="color: var(--t-text-faint);">مجموع الديون − المسدد − المرتجعات − التحويلات الصادرة</p>
+            <h2 class="text-h4 font-weight-bold mb-1" :style="{ color: (remaining || 0) >= 0 ? 'var(--t-text)' : '#10B981' }">
               {{ Number(remaining || 0).toLocaleString() }} د.ع
             </h2>
           </v-card>
@@ -320,6 +362,8 @@
                     color="error"
                     size="small"
                     @click="removeServiceLine(idx)"
+                    aria-label="حذف الخدمة"
+                    title="حذف الخدمة"
                   >
                     <PhTrash :size="18" weight="bold" />
                   </v-btn>
@@ -492,8 +536,8 @@ import { useRoute, useRouter } from 'vue-router'
 import { useToast } from 'vue-toastification'
 import AppLayout from '@/components/AppLayout.vue'
 import { supplierAPI, expenseAPI, expenseCategoryAPI, accountAPI } from '@/services/api'
-import { formatDate } from '@/utils/dateFormatter'
-import { PhArrowRight, PhCurrencyDollar, PhMoney, PhReceipt, PhTrash } from '@phosphor-icons/vue'
+import { formatDate, todayBusinessDate } from '@/utils/dateFormatter'
+import { PhArrowRight, PhArrowUUpLeft, PhArrowsLeftRight, PhCurrencyDollar, PhMoney, PhReceipt, PhTrash } from '@phosphor-icons/vue'
 
 const toast = useToast()
 const route = useRoute()
@@ -511,7 +555,7 @@ const loading = ref({
 const expenseDialog = ref(false)
 const expenseFormRef = ref(null)
 const expenseForm = ref({
-  expenseDate: new Date().toISOString().split('T')[0],
+  expenseDate: todayBusinessDate(),
   amount: 0,
   expenseCategoryId: null,
   paidFromAccountId: null,
@@ -589,7 +633,7 @@ const serviceInvoiceHeaders = [
 
 const serviceInvoiceDialog = ref(false)
 const serviceInvoiceForm = ref({
-  invoiceDate: new Date().toISOString().split('T')[0],
+  invoiceDate: todayBusinessDate(),
   dueDate: '',
   notes: '',
   items: [{ description: '', amount: 0 }]
@@ -603,7 +647,7 @@ const removeServiceLine = (idx) => {
 }
 const openAddServiceInvoiceDialog = () => {
   serviceInvoiceForm.value = {
-    invoiceDate: new Date().toISOString().split('T')[0],
+    invoiceDate: todayBusinessDate(),
     dueDate: '',
     notes: '',
     items: [{ description: '', amount: 0 }]
@@ -647,7 +691,7 @@ const loadProfile = async () => {
     const response = await supplierAPI.getProfile(supplierId)
     profile.value = response.data
   } catch (error) {
-    toast.error('فشل تحميل بيانات الدين')
+    toast.error(error.response?.data?.message || 'فشل تحميل بيانات الدين')
     console.error(error)
     router.push('/suppliers')
   } finally {
@@ -681,7 +725,7 @@ const onExpenseCategorySelect = (id) => {
 
 const openAddPaymentDialog = async () => {
   expenseForm.value = {
-    expenseDate: new Date().toISOString().split('T')[0],
+    expenseDate: todayBusinessDate(),
     amount: 0,
     expenseCategoryId: null,
     paidFromAccountId: null,
