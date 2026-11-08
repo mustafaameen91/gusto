@@ -8,7 +8,7 @@
           <div class="login-hero pa-10 text-center d-flex flex-column align-center justify-center" :style="{ backgroundImage: `url(${headerBg})` }" style="position: relative; min-height: 350px">
             <div style="position: relative; z-index: 1" class="d-flex flex-column align-center">
               <v-avatar size="140" color="white" class="mb-6 elevation-12">
-                <v-img :src="logoImg" alt="جوستو" contain class="ma-3"></v-img>
+                <img :src="logoImg" alt="جوستو" style="width: 100px; height: 100px; object-fit: contain" />
               </v-avatar>
               <h1 class="text-h3 font-weight-bold text-white text-shadow mb-3">مطعم جوستو</h1>
               <p class="text-h5 text-white mb-4" style="opacity: 0.95">Gusto Restaurant</p>
