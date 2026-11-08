@@ -1,7 +1,13 @@
 import { createApp } from 'vue'
 import { createPinia } from 'pinia'
 import App from './App.vue'
-import router from './router'
+import router, { reloadForNewVersion } from './router'
+
+// Vite reports a page file that can't load (e.g. removed by a newer deploy). The router's error
+// handler reloads onto the page the user was opening; this is only a fallback if it doesn't.
+window.addEventListener('vite:preloadError', () => {
+  setTimeout(() => reloadForNewVersion(), 1500)
+})
 import vuetify from './plugins/vuetify'
 import Toast from 'vue-toastification'
 import 'vue-toastification/dist/index.css'

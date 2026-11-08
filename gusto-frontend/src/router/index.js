@@ -210,5 +210,24 @@ router.beforeEach((to, from, next) => {
   next()
 })
 
+// After a new version is deployed, an app left open still runs the old version, whose page
+// files no longer exist on the server. Reload once onto the new version instead of freezing.
+const CHUNK_ERROR = /Failed to fetch dynamically imported module|Importing a module script failed|error loading dynamically imported module|Unable to preload CSS/i
+router.onError((error, to) => {
+  if (CHUNK_ERROR.test(error?.message || '')) reloadForNewVersion(to?.fullPath)
+})
+
+export function reloadForNewVersion(path) {
+  // At most once every 20 s, so a real outage can't cause a reload loop
+  try {
+    const last = Number(sessionStorage.getItem('gusto_version_reload') || 0)
+    if (Date.now() - last < 20000) return false
+    sessionStorage.setItem('gusto_version_reload', String(Date.now()))
+  } catch (_) { /* storage blocked: still reload once */ }
+  if (path && path !== window.location.pathname + window.location.search) window.location.assign(path)
+  else window.location.reload()
+  return true
+}
+
 export default router
 

@@ -126,7 +126,14 @@ app.get("*", (req, res) => {
     });
   }
 
+  // A missing file (an old version's /assets/*.js after a deploy, a missing photo…) is a 404,
+  // never the app page: answering HTML for a script makes the open app fail with a MIME error.
+  if (req.path.startsWith("/assets/") || path.extname(req.path)) {
+    return res.status(404).type("text/plain").send("Not found");
+  }
+
   // Serve index.html for all other routes (SPA routing)
+  res.setHeader("Cache-Control", "no-cache");
   res.sendFile(path.join(frontendDistPath, "index.html"), (err) => {
     if (err) {
       console.error("Error serving index.html:", err);
