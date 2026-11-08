@@ -744,6 +744,29 @@ INSERT IGNORE INTO `ExpenseCategories` (`idExpenseCategory`, `name`, `defaultAcc
 INSERT IGNORE INTO `StorageLocations` (`idStorageLocation`, `name`, `code`, `isActive`, `createdAt`) VALUES (1,'المخزن الرئيسي','main',1,NOW());
 INSERT IGNORE INTO `StorageLocations` (`idStorageLocation`, `name`, `code`, `isActive`, `createdAt`) VALUES (2,'مخزن المطبخ (داخلي)','kitchen_internal',1,NOW());
 
+-- Waiter tablet orders waiting for the cashier
+CREATE TABLE IF NOT EXISTS `WaiterOrders` (
+  `idWaiterOrder` int(11) NOT NULL AUTO_INCREMENT,
+  `waiterId` int(11) NOT NULL,
+  `tableNumber` varchar(20) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `notes` text COLLATE utf8mb4_unicode_ci,
+  `items` text COLLATE utf8mb4_unicode_ci NOT NULL COMMENT 'JSON: [{menuItemId,itemSizeId,quantity,specialInstructions,itemName,sizeName,price}]',
+  `status` enum('pending','accepted','rejected','cancelled') COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'pending',
+  `orderId` int(11) DEFAULT NULL COMMENT 'the sale the cashier made from it',
+  `handledBy` int(11) DEFAULT NULL,
+  `handledAt` datetime DEFAULT NULL,
+  `rejectReason` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `createdAt` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`idWaiterOrder`),
+  KEY `idx_waiter_orders_status` (`status`),
+  KEY `idx_waiter_orders_waiter` (`waiterId`),
+  KEY `fk_waiter_orders_order` (`orderId`),
+  KEY `fk_waiter_orders_handled` (`handledBy`),
+  CONSTRAINT `fk_waiter_orders_waiter` FOREIGN KEY (`waiterId`) REFERENCES `Staff` (`idStaff`),
+  CONSTRAINT `fk_waiter_orders_order` FOREIGN KEY (`orderId`) REFERENCES `Orders` (`idOrder`) ON DELETE SET NULL,
+  CONSTRAINT `fk_waiter_orders_handled` FOREIGN KEY (`handledBy`) REFERENCES `Staff` (`idStaff`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 -- Default admin user — email: admin@gusto.com, password: admin123
 -- CHANGE THIS PASSWORD after first login.
 INSERT INTO `Staff` (`fullName`, `email`, `phone`, `password`, `role`, `hireDate`, `salary`, `isActive`)

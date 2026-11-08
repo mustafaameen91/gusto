@@ -10,7 +10,8 @@ module.exports = (app) => {
   router.use(authMiddleware.verifyToken);
 
   // Order routes
-  router.post("/", requireRole(["admin", "supervisor", "cashier", "waiter"]), orders.create);
+  // Waiters send orders to the cashier (/api/waiter-orders); only the till takes payment
+  router.post("/", requireRole(["admin", "supervisor", "cashier"]), orders.create);
   router.get("/", orders.findAll);
   router.get("/active", orders.getActive);
   router.get("/daily-summary", orders.getDailySummary);

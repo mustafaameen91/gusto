@@ -65,8 +65,8 @@ function toPng(bands, file) {
 }
 
 const ORDER = {
-  orderNumber: "1042", createdAt: new Date().toISOString(), table: "7", orderType: "cashier", saleType: "cash",
-  cashierName: "علي الكاشير", notes: "الزبون مستعجل", subtotal: 47000, discount: 2000, total: 45000,
+  orderId: 245, orderNumber: "ORD-1794147806616", createdAt: new Date().toISOString(), table: "7", orderType: "cashier", saleType: "cash",
+  cashierName: "علي الكاشير", waiterName: "حسن", notes: "الزبون مستعجل", subtotal: 47000, discount: 2000, total: 45000,
   items: [
     { name: "مشاوي مشكلة", size: "كبير", quantity: 2, unitPrice: 15000, lineTotal: 30000, notes: "بدون بصل", categoryId: 4 },
     { name: "حمص بالطحينة", quantity: 1, unitPrice: 4000, lineTotal: 4000, notes: "لاتوجد", categoryId: 1 },

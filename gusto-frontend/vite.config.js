@@ -18,8 +18,9 @@ export default defineConfig({
         theme_color: "#046375",
         background_color: "#ffffff",
         display: "standalone",
-        orientation: "portrait-primary",
-        start_url: "/",
+        orientation: "any", // tablets are used in landscape and portrait
+        id: "/",
+        start_url: "/", // opens on each role's own page (waiters: the table menu)
         scope: "/",
         lang: "ar",
         dir: "rtl",
@@ -31,6 +32,8 @@ export default defineConfig({
       },
       workbox: {
         globPatterns: ["**/*.{js,css,html,ico,png,svg,woff2}"],
+        // The app shell may answer page loads offline, never API calls, photos or live updates
+        navigateFallbackDenylist: [/^\/api\//, /^\/uploads\//, /^\/socket\.io\//],
         runtimeCaching: [
           {
             urlPattern: /\/uploads\/.*\.(?:png|jpg|jpeg|webp|gif)$/i,

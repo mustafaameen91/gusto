@@ -22,7 +22,20 @@
           <!-- Compact Header -->
           <header class="pos-menu__head">
             <h1 class="pos-menu__title">القائمة</h1>
-            <span class="pos-menu__date">{{ currentDate }}</span>
+            <div class="pos-menu__head-end">
+              <span class="pos-menu__date">{{ currentDate }}</span>
+              <button
+                type="button"
+                class="pos-waiter-btn"
+                :class="{ 'pos-waiter-btn--has': waitingOrders.length > 0 }"
+                :aria-label="`طلبات النُدُل: ${waitingOrders.length} بانتظار الكاشير`"
+                @click="openWaiterOrders"
+              >
+                <PhBellRinging :size="20" weight="bold" />
+                <span class="pos-waiter-btn__label">طلبات النُدُل</span>
+                <span class="pos-waiter-btn__badge" aria-hidden="true">{{ waitingOrders.length }}</span>
+              </button>
+            </div>
           </header>
 
           <!-- Category Tabs -->
@@ -86,6 +99,13 @@
                 الطلب
               </h2>
               <span v-if="cart.length" class="pos-cart__count">{{ cart.length }}</span>
+            </div>
+            <div v-if="activeWaiterOrder" class="pos-waiter-chip" role="status">
+              <PhUser :size="16" weight="bold" />
+              <span class="pos-waiter-chip__text">طلب {{ activeWaiterOrder.waiterName }} — طاولة {{ activeWaiterOrder.tableNumber }}</span>
+              <button type="button" class="pos-waiter-chip__x" aria-label="فك ارتباط السلة بطلب النادل" title="فك الارتباط (تبقى السلة كما هي)" @click="detachWaiterOrder">
+                <PhX :size="16" weight="bold" />
+              </button>
             </div>
             <div class="pos-cart__table">
               <PhMapPin :size="16" weight="bold" />
@@ -258,20 +278,172 @@
         </footer>
       </div>
     </v-dialog>
+
+    <!-- Waiter Orders List -->
+    <v-dialog v-model="showWaiterOrders" max-width="600" scrollable>
+      <div class="pos-dialog pos-wo">
+        <header class="pos-dialog__head">
+          <h3>طلبات النُدُل ({{ waitingOrders.length }})</h3>
+          <div class="pos-wo__head-actions">
+            <button type="button" class="pos-dialog__close" aria-label="تحديث القائمة" title="تحديث" :disabled="waiterOrdersLoading" @click="loadWaiterOrders()">
+              <PhArrowsClockwise :size="20" weight="bold" :class="{ 'pos-wo__spin': waiterOrdersLoading }" />
+            </button>
+            <button type="button" class="pos-dialog__close" aria-label="إغلاق" @click="showWaiterOrders = false">
+              <PhX :size="20" weight="bold" />
+            </button>
+          </div>
+        </header>
+
+        <div class="pos-wo__body">
+          <p v-if="!socketConnected" class="pos-wo__notice">
+            <PhWifiSlash :size="16" weight="bold" />
+            الاتصال المباشر منقطع — تُحدَّث القائمة كل 30 ثانية
+          </p>
+          <p v-if="!isDailyReceiptOpen" class="pos-wo__notice pos-wo__notice--warn">
+            <PhWarning :size="16" weight="bold" />
+            الصندوق مغلق — افتح صندوق اليومية لتحميل الطلبات في السلة
+          </p>
+
+          <div v-if="waiterOrdersLoading && !waitingOrders.length" class="pos-wo__empty">
+            <PhArrowsClockwise :size="36" weight="thin" class="pos-wo__spin" />
+            <p>جاري تحميل الطلبات...</p>
+          </div>
+          <div v-else-if="!waitingOrders.length" class="pos-wo__empty">
+            <PhCheckCircle :size="40" weight="thin" />
+            <p>لا توجد طلبات بانتظار الكاشير</p>
+          </div>
+
+          <article
+            v-for="wo in waitingOrders"
+            :key="wo.idWaiterOrder"
+            class="pos-wo-card"
+            :class="{ 'pos-wo-card--active': activeWaiterOrder?.id === wo.idWaiterOrder }"
+            :aria-label="`طلب طاولة ${wo.tableNumber} من ${wo.waiterName}`"
+          >
+            <header class="pos-wo-card__head">
+              <div class="pos-wo-card__table">
+                <span class="pos-wo-card__table-label">طاولة</span>
+                <span class="pos-wo-card__table-num">{{ wo.tableNumber }}</span>
+              </div>
+              <div class="pos-wo-card__meta">
+                <span class="pos-wo-card__waiter"><PhUser :size="15" weight="bold" /> {{ wo.waiterName || "نادل" }}</span>
+                <span class="pos-wo-card__time"><PhClock :size="15" weight="bold" /> {{ timeAgo(wo.createdAt) }}</span>
+              </div>
+              <span v-if="activeWaiterOrder?.id === wo.idWaiterOrder" class="pos-wo-card__tag">في السلة الآن</span>
+            </header>
+
+            <ul class="pos-wo-card__lines">
+              <li v-for="(line, i) in wo.items || []" :key="i" class="pos-wo-card__line">
+                <div class="pos-wo-card__line-main">
+                  <span class="pos-wo-card__qty">{{ line.quantity }} ×</span>
+                  <span>{{ line.itemName }}<template v-if="line.sizeName"> ({{ line.sizeName }})</template></span>
+                </div>
+                <span v-if="line.specialInstructions" class="pos-wo-card__line-note"><PhNote :size="13" weight="bold" /> {{ line.specialInstructions }}</span>
+              </li>
+            </ul>
+
+            <p v-if="wo.notes" class="pos-wo-card__notes"><PhNotePencil :size="15" weight="bold" /> {{ wo.notes }}</p>
+
+            <footer class="pos-wo-card__foot">
+              <span class="pos-wo-card__total">
+                الإجمالي التقديري
+                <strong>{{ Number(wo.total || 0).toLocaleString() }} د.ع</strong>
+              </span>
+              <div class="pos-wo-card__actions">
+                <button type="button" class="pos-wo-btn pos-wo-btn--danger" @click="openReject(wo)">
+                  <PhProhibit :size="18" weight="bold" />
+                  رفض
+                </button>
+                <button
+                  type="button"
+                  class="pos-wo-btn pos-wo-btn--primary"
+                  :disabled="!isDailyReceiptOpen || loadingWaiterOrderId !== null"
+                  @click="loadWaiterOrder(wo)"
+                >
+                  <PhShoppingCart :size="18" weight="bold" />
+                  {{ loadingWaiterOrderId === wo.idWaiterOrder ? "جاري التحميل..." : "تحميل في السلة" }}
+                </button>
+              </div>
+            </footer>
+          </article>
+        </div>
+      </div>
+    </v-dialog>
+
+    <!-- Replace cart confirmation -->
+    <v-dialog v-model="showReplaceConfirm" max-width="420">
+      <div class="pos-dialog">
+        <header class="pos-dialog__head">
+          <h3>استبدال محتوى السلة؟</h3>
+          <button type="button" class="pos-dialog__close" aria-label="إلغاء" @click="cancelReplace">
+            <PhX :size="20" weight="bold" />
+          </button>
+        </header>
+        <div class="pos-dialog__body">
+          <p class="pos-wo-confirm__text">
+            السلة تحتوي على {{ cart.length }} صنف. سيتم حذفها وتحميل طلب طاولة <strong>{{ pendingReplace?.tableNumber }}</strong> من {{ pendingReplace?.waiterName }} بدلاً منها.
+          </p>
+        </div>
+        <footer class="pos-dialog__foot pos-wo-confirm__foot">
+          <button type="button" class="pos-wo-btn pos-wo-btn--ghost" @click="cancelReplace">إلغاء</button>
+          <button type="button" class="pos-wo-btn pos-wo-btn--primary" @click="confirmReplace">
+            <PhShoppingCart :size="18" weight="bold" />
+            استبدال وتحميل
+          </button>
+        </footer>
+      </div>
+    </v-dialog>
+
+    <!-- Reject waiter order -->
+    <v-dialog v-model="showRejectDialog" max-width="440">
+      <div class="pos-dialog">
+        <header class="pos-dialog__head pos-dialog__head--danger">
+          <h3>رفض طلب طاولة {{ rejectTarget?.tableNumber }}</h3>
+          <button type="button" class="pos-dialog__close" aria-label="إلغاء" @click="showRejectDialog = false">
+            <PhX :size="20" weight="bold" />
+          </button>
+        </header>
+        <div class="pos-dialog__body">
+          <p class="pos-sizes__label" id="pos-reject-label">سبب الرفض (اختياري) — سيظهر للنادل</p>
+          <div class="pos-wo-reasons" role="group" aria-labelledby="pos-reject-label">
+            <button
+              v-for="r in rejectReasons"
+              :key="r"
+              type="button"
+              class="pos-wo-reason"
+              :class="{ 'pos-wo-reason--active': rejectReason === r }"
+              :aria-pressed="rejectReason === r"
+              @click="rejectReason = rejectReason === r ? '' : r"
+            >
+              {{ r }}
+            </button>
+          </div>
+          <textarea v-model="rejectReason" class="pos-notes" rows="2" maxlength="200" placeholder="اكتب سبباً آخر..." aria-labelledby="pos-reject-label"></textarea>
+        </div>
+        <footer class="pos-dialog__foot pos-wo-confirm__foot">
+          <button type="button" class="pos-wo-btn pos-wo-btn--ghost" @click="showRejectDialog = false">إلغاء</button>
+          <button type="button" class="pos-wo-btn pos-wo-btn--danger-solid" :disabled="rejecting" @click="confirmReject">
+            <PhProhibit :size="18" weight="bold" />
+            {{ rejecting ? "جاري الرفض..." : "تأكيد الرفض" }}
+          </button>
+        </footer>
+      </div>
+    </v-dialog>
   </AppLayout>
 </template>
 
 <script setup>
-import { ref, computed, watch, onMounted } from "vue";
+import { ref, computed, watch, onMounted, onBeforeUnmount } from "vue";
+import { io } from "socket.io-client";
 import { useRouter } from "vue-router";
 import { useAuthStore } from "@/stores/auth";
 import AppLayout from "@/components/AppLayout.vue";
-import { categoryAPI, menuAPI, orderAPI, customerAPI, kitchenStockAPI } from "@/services/api";
+import { categoryAPI, menuAPI, orderAPI, customerAPI, kitchenStockAPI, waiterOrderAPI } from "@/services/api";
 import { useToast } from "vue-toastification";
 import logoPng from "@/assets/logo.png";
 import { useThemeStore } from "@/stores/theme";
 import { formatCurrentDateArabic } from "@/utils/dateFormatter";
-import { PhShoppingCart, PhMinus, PhPlus, PhTrash, PhX, PhCheckCircle, PhLockKeyOpen, PhForkKnife, PhTag, PhMoney, PhCreditCard, PhReceipt, PhMapPin } from "@phosphor-icons/vue";
+import { PhShoppingCart, PhMinus, PhPlus, PhTrash, PhX, PhCheckCircle, PhLockKeyOpen, PhForkKnife, PhTag, PhMoney, PhCreditCard, PhReceipt, PhMapPin, PhBellRinging, PhUser, PhClock, PhNote, PhNotePencil, PhProhibit, PhWifiSlash, PhArrowsClockwise, PhWarning } from "@phosphor-icons/vue";
 import { itemSizeAPI, dailyReceiptAPI } from "@/services/api";
 
 const authStore = useAuthStore();
@@ -313,6 +485,22 @@ const customerName = ref("");
 const customerPhone = ref("");
 const orderNotes = ref("");
 const showCustomerFields = ref(false);
+
+// ===== Waiter orders (sent from the waiters' tablets) =====
+const waiterOrders = ref([]);
+const waiterOrdersLoading = ref(false);
+const showWaiterOrders = ref(false);
+const activeWaiterOrder = ref(null); // { id, waiterName, tableNumber } while the cart holds a waiter order
+const loadingWaiterOrderId = ref(null);
+const showReplaceConfirm = ref(false);
+const pendingReplace = ref(null);
+const showRejectDialog = ref(false);
+const rejectTarget = ref(null);
+const rejectReason = ref("");
+const rejecting = ref(false);
+const rejectReasons = ["الطاولة غير صحيحة", "صنف غير متوفر", "طلب مكرر", "الزبون ألغى الطلب"];
+const socketConnected = ref(false);
+const nowTick = ref(Date.now());
 
 const rules = { required: (value) => !!value || "مطلوب" };
 
@@ -595,6 +783,7 @@ const clearCart = () => {
   customerPhone.value = "";
   orderNotes.value = "";
   showCustomerFields.value = false;
+  activeWaiterOrder.value = null;
 };
 
 const checkout = async () => {
@@ -617,6 +806,7 @@ const checkout = async () => {
       subtotal: subtotal.value,
       discount: discountType.value === "percentage" ? Number(discount.value) || 0 : calculatedDiscountAmount.value,
       discountType: discountType.value,
+      waiterOrderId: activeWaiterOrder.value?.id || null,
       orderItems: cart.value.map((item) => ({
         menuItemId: item.idMenuItem,
         quantity: item.quantity,
@@ -626,6 +816,7 @@ const checkout = async () => {
       })),
     };
     const response = await orderAPI.create(orderData);
+    const claimedWaiterOrderId = activeWaiterOrder.value?.id || null;
     toast.success(`تم إنشاء الطلب #${response.data.orderNumber} بنجاح!`);
     if (saleType.value === "credit" && selectedCustomerId.value && response.data?.orderNumber) {
       const id = selectedCustomerId.value;
@@ -663,12 +854,14 @@ const checkout = async () => {
     // at the same time, on the printers set up in this POS's printer settings.
     if (window.electronAPI?.printOrder) {
       const printJob = {
+        orderId: saved.orderId ?? null, // short number printed large on tickets
         orderNumber: saved.orderNumber,
         createdAt: new Date().toISOString(),
         table: tableNumber.value || null,
         orderType,
         saleType: saleType.value,
         cashierName: authStore.user?.fullName || null,
+        waiterName: activeWaiterOrder.value?.waiterName || null,
         customerName: customerName.value || null,
         customerPhone: customerPhone.value || null,
         notes: orderNotes.value || null,
@@ -719,6 +912,7 @@ const checkout = async () => {
         await window.electronAPI.printReceipt({ type: "html", html: receiptHtml });
       } catch (_) {}
     }
+    if (claimedWaiterOrderId) removeWaiterOrder(claimedWaiterOrderId);
     clearCart();
     await loadKitchenStock();
   } catch (error) {
@@ -734,6 +928,12 @@ const checkout = async () => {
       toast.error(serverMsg || "الخصم مسموح للمشرف أو المدير فقط");
     } else if (code === "NO_OPEN_SHIFT") {
       toast.error(serverMsg || "يجب فتح الشفت أولاً");
+    } else if (code === "WAITER_ORDER_TAKEN") {
+      // Someone else took it (or the waiter cancelled): keep the cart, just unlink it
+      toast.error(serverMsg || "طلب النادل لم يعد متاحاً");
+      if (activeWaiterOrder.value) removeWaiterOrder(activeWaiterOrder.value.id);
+      detachWaiterOrder();
+      loadWaiterOrders();
     } else {
       toast.error(error.response?.data?.message || "فشل إنشاء الطلب");
     }
@@ -904,12 +1104,282 @@ watch(
   { immediate: true },
 );
 
+// ===== Waiter orders =====
+const waitingOrders = computed(() =>
+  [...waiterOrders.value].sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()),
+);
+
+function timeAgo(value) {
+  const t = new Date(value).getTime();
+  if (!t) return "";
+  const mins = Math.max(0, Math.floor((nowTick.value - t) / 60000));
+  if (mins < 1) return "الآن";
+  if (mins < 60) return `منذ ${mins} د`;
+  const hours = Math.floor(mins / 60);
+  return `منذ ${hours} س${mins % 60 ? ` و${mins % 60} د` : ""}`;
+}
+
+async function loadWaiterOrders() {
+  waiterOrdersLoading.value = true;
+  try {
+    const res = await waiterOrderAPI.pending();
+    const rows = Array.isArray(res.data) ? res.data : [];
+    waiterOrders.value = rows.filter((r) => !r.status || r.status === "pending");
+  } catch (_) {
+    // Keep the last list; polling / the socket will retry
+  } finally {
+    waiterOrdersLoading.value = false;
+  }
+}
+
+function removeWaiterOrder(id) {
+  waiterOrders.value = waiterOrders.value.filter((w) => w.idWaiterOrder !== id);
+}
+
+function upsertWaiterOrder(row) {
+  const i = waiterOrders.value.findIndex((w) => w.idWaiterOrder === row.idWaiterOrder);
+  if (i === -1) waiterOrders.value = [...waiterOrders.value, row];
+  else waiterOrders.value.splice(i, 1, row);
+}
+
+function openWaiterOrders() {
+  showWaiterOrders.value = true;
+  loadWaiterOrders();
+}
+
+function detachWaiterOrder() {
+  activeWaiterOrder.value = null;
+}
+
+// Short two-tone chime, synthesized (no audio file). Autoplay may be blocked until the
+// cashier has interacted with the page — then it just stays silent.
+let audioCtx = null;
+function playChime() {
+  try {
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    if (!Ctx) return;
+    if (!audioCtx) audioCtx = new Ctx();
+    if (audioCtx.state === "suspended") audioCtx.resume().catch(() => {});
+    const start = audioCtx.currentTime;
+    [880, 1320].forEach((freq, i) => {
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.type = "sine";
+      osc.frequency.value = freq;
+      const t0 = start + i * 0.16;
+      gain.gain.setValueAtTime(0.0001, t0);
+      gain.gain.exponentialRampToValueAtTime(0.25, t0 + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.14);
+      osc.connect(gain).connect(audioCtx.destination);
+      osc.start(t0);
+      osc.stop(t0 + 0.15);
+    });
+  } catch (_) {}
+}
+
+async function getSizesFor(menuItemId) {
+  if (sizesCache.value[menuItemId]) return sizesCache.value[menuItemId];
+  try {
+    const res = await itemSizeAPI.getByMenuItem(menuItemId);
+    sizesCache.value[menuItemId] = res.data || [];
+  } catch (_) {
+    return [];
+  }
+  return sizesCache.value[menuItemId];
+}
+
+async function loadWaiterOrder(wo) {
+  if (!wo || loadingWaiterOrderId.value !== null) return;
+  if (cart.value.length > 0) {
+    pendingReplace.value = wo;
+    showReplaceConfirm.value = true;
+    return;
+  }
+  loadingWaiterOrderId.value = wo.idWaiterOrder;
+  try {
+    await loadKitchenStock(); // fresh ready-portion counts before checking availability
+    const entries = [];
+    const skipped = [];
+    const reduced = [];
+    for (const line of wo.items || []) {
+      const label = `${line.itemName || "صنف"}${line.sizeName ? ` (${line.sizeName})` : ""}`;
+      const menuItem = (menuItems.value || []).find((m) => m.idMenuItem === Number(line.menuItemId));
+      if (!menuItem || !menuItem.isActive || !menuItem.isAvailable) {
+        skipped.push(label);
+        continue;
+      }
+      let sizeObj = null;
+      if (line.itemSizeId) {
+        const sizes = await getSizesFor(menuItem.idMenuItem);
+        sizeObj = sizes.find((s) => s.idItemSize === Number(line.itemSizeId)) || null;
+        if (!sizeObj) {
+          skipped.push(label);
+          continue;
+        }
+      }
+      let qty = Math.max(1, Number(line.quantity) || 1);
+      const id = menuItem.idMenuItem;
+      if (isKitchenMenuItem(id)) {
+        const inEntries = entries.reduce((sum, e) => (e.idMenuItem === id ? sum + e.quantity : sum), 0);
+        const available = getKitchenAvailable(id) - inEntries;
+        if (available <= 0) {
+          skipped.push(label);
+          continue;
+        }
+        if (qty > available) {
+          reduced.push(`${label}: ${available} من ${qty}`);
+          qty = available;
+        }
+      }
+      // Same shape confirmAddToCart pushes
+      entries.push({
+        ...menuItem,
+        quantity: qty,
+        selectedSizeId: sizeObj ? sizeObj.idItemSize : null,
+        selectedSizeName: sizeObj ? sizeObj.sizeName : null,
+        basePrice: Number(menuItem.basePrice) + (sizeObj ? Number(sizeObj.priceAdjustment) : 0),
+        specialInstructions: (line.specialInstructions || "").trim(),
+      });
+    }
+
+    if (!entries.length) {
+      toast.error(`تعذّر تحميل طلب طاولة ${wo.tableNumber}: كل الأصناف غير متوفرة (${skipped.join("، ")})`, { timeout: 10000 });
+      return;
+    }
+
+    clearCart();
+    cart.value = entries;
+    tableNumber.value = String(wo.tableNumber ?? "");
+    orderNotes.value = wo.notes || "";
+    activeWaiterOrder.value = { id: wo.idWaiterOrder, waiterName: wo.waiterName || "نادل", tableNumber: wo.tableNumber };
+    showWaiterOrders.value = false;
+    toast.success(`تم تحميل طلب طاولة ${wo.tableNumber} في السلة`);
+    if (skipped.length) toast.warning(`لم تُضف أصناف غير متوفرة أو محذوفة من القائمة: ${skipped.join("، ")}`, { timeout: 10000 });
+    if (reduced.length) toast.warning(`خُفّضت الكمية حسب المتوفر: ${reduced.join("، ")}`, { timeout: 10000 });
+  } finally {
+    loadingWaiterOrderId.value = null;
+  }
+}
+
+function cancelReplace() {
+  showReplaceConfirm.value = false;
+  pendingReplace.value = null;
+}
+
+function confirmReplace() {
+  const wo = pendingReplace.value;
+  showReplaceConfirm.value = false;
+  pendingReplace.value = null;
+  if (!wo) return;
+  cart.value = [];
+  loadWaiterOrder(wo);
+}
+
+function openReject(wo) {
+  rejectTarget.value = wo;
+  rejectReason.value = "";
+  showRejectDialog.value = true;
+}
+
+async function confirmReject() {
+  const wo = rejectTarget.value;
+  if (!wo || rejecting.value) return;
+  rejecting.value = true;
+  try {
+    await waiterOrderAPI.reject(wo.idWaiterOrder, (rejectReason.value || "").trim() || null);
+    removeWaiterOrder(wo.idWaiterOrder);
+    if (activeWaiterOrder.value?.id === wo.idWaiterOrder) detachWaiterOrder();
+    toast.success(`تم رفض طلب طاولة ${wo.tableNumber}`);
+    showRejectDialog.value = false;
+    rejectTarget.value = null;
+  } catch (error) {
+    toast.error(error.response?.data?.message || "تعذّر رفض الطلب");
+    if (error.response?.status === 409) {
+      showRejectDialog.value = false;
+      loadWaiterOrders();
+    }
+  } finally {
+    rejecting.value = false;
+  }
+}
+
+let waiterSocket = null;
+let waiterPollTimer = null;
+let nowTimer = null;
+const startWaiterPolling = () => {
+  if (!waiterPollTimer) waiterPollTimer = setInterval(loadWaiterOrders, 30000);
+};
+const stopWaiterPolling = () => {
+  if (waiterPollTimer) clearInterval(waiterPollTimer);
+  waiterPollTimer = null;
+};
+
+function connectWaiterSocket() {
+  const socketUrl = import.meta.env.VITE_API_URL || window.location.origin;
+  waiterSocket = io(socketUrl, { transports: ["websocket", "polling"], auth: { token: localStorage.getItem("gusto_token") } });
+  waiterSocket.on("connect", () => {
+    socketConnected.value = true;
+    stopWaiterPolling();
+    waiterSocket.emit("join_cashier");
+    loadWaiterOrders(); // catch anything sent while we were offline
+  });
+  const onDown = () => {
+    socketConnected.value = false;
+    startWaiterPolling();
+  };
+  waiterSocket.on("disconnect", onDown);
+  waiterSocket.on("connect_error", onDown);
+  waiterSocket.on("waiter_order_new", (row) => {
+    if (!row?.idWaiterOrder || (row.status && row.status !== "pending")) return;
+    const isNew = !waiterOrders.value.some((w) => w.idWaiterOrder === row.idWaiterOrder);
+    upsertWaiterOrder(row);
+    if (!isNew) return;
+    playChime();
+    toast.info(`طلب جديد من ${row.waiterName || "نادل"} — طاولة ${row.tableNumber}`, {
+      closeOnClick: true,
+      onClick: openWaiterOrders,
+    });
+  });
+  waiterSocket.on("waiter_order_updated", (row) => {
+    if (!row?.idWaiterOrder) return;
+    if (row.status === "pending") {
+      upsertWaiterOrder(row);
+      return;
+    }
+    removeWaiterOrder(row.idWaiterOrder);
+    // The order in this cart was cancelled / rejected / taken elsewhere (not by our own checkout in flight)
+    if (activeWaiterOrder.value?.id === row.idWaiterOrder && !processing.value) {
+      const t = row.tableNumber;
+      const msg = row.status === "cancelled" ? `ألغى النادل طلب طاولة ${t}` : row.status === "rejected" ? `تم رفض طلب طاولة ${t}` : `استُلم طلب طاولة ${t} من جهاز آخر`;
+      toast.warning(`${msg} — السلة لم تعد مرتبطة به`, { timeout: 10000 });
+      detachWaiterOrder();
+    }
+  });
+}
+
 onMounted(async () => {
   // Load critical data first (what the cashier sees immediately)
   await Promise.all([loadCategories(), loadMenu(), loadKitchenStock()]);
   // Then load non-critical data in background
   checkDailyReceipt();
   loadCustomers();
+  loadWaiterOrders();
+  connectWaiterSocket();
+  nowTimer = setInterval(() => (nowTick.value = Date.now()), 30000);
+});
+
+onBeforeUnmount(() => {
+  stopWaiterPolling();
+  if (nowTimer) clearInterval(nowTimer);
+  if (waiterSocket) {
+    waiterSocket.removeAllListeners();
+    waiterSocket.disconnect();
+    waiterSocket = null;
+  }
+  if (audioCtx) {
+    audioCtx.close().catch(() => {});
+    audioCtx = null;
+  }
 });
 </script>
 
@@ -990,7 +1460,7 @@ onMounted(async () => {
 .pos-menu__head {
   padding: 16px 20px 12px;
   display: flex;
-  align-items: baseline;
+  align-items: center;
   justify-content: space-between;
 }
 
@@ -1828,6 +2298,499 @@ onMounted(async () => {
 .pos-dialog__add:hover {
   box-shadow: 0 4px 16px rgba(4, 99, 117, 0.25);
   transform: translateY(-1px);
+}
+
+/* ===== WAITER ORDERS ===== */
+.pos-menu__head-end {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.pos-waiter-btn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 0 14px;
+  border-radius: 12px;
+  border: 1px solid var(--t-border-medium);
+  background: var(--t-surface);
+  color: var(--t-text);
+  font-size: 0.875rem;
+  font-weight: 700;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background 0.18s ease-out, border-color 0.18s ease-out;
+}
+
+.pos-waiter-btn svg {
+  color: var(--t-primary);
+}
+
+.pos-waiter-btn:hover {
+  background: var(--t-hover);
+  border-color: var(--t-primary);
+}
+
+.pos-waiter-btn__badge {
+  position: relative;
+  isolation: isolate;
+  min-width: 26px;
+  height: 26px;
+  padding: 0 7px;
+  border-radius: 13px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.8125rem;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  background: var(--t-surface-high);
+  color: var(--t-text-dim);
+}
+
+.pos-waiter-btn--has {
+  border-color: var(--t-primary);
+}
+
+.pos-waiter-btn--has .pos-waiter-btn__badge {
+  background: var(--t-primary);
+  color: #fff;
+}
+
+.pos-waiter-btn--has .pos-waiter-btn__badge::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: var(--t-primary);
+  opacity: 0.45;
+  z-index: -1;
+  animation: pos-waiter-pulse 1.8s ease-out infinite;
+}
+
+@keyframes pos-waiter-pulse {
+  0% { transform: scale(1); opacity: 0.45; }
+  70%, 100% { transform: scale(1.7); opacity: 0; }
+}
+
+.pos-waiter-btn:focus-visible,
+.pos-waiter-chip__x:focus-visible,
+.pos-wo-btn:focus-visible,
+.pos-wo-reason:focus-visible,
+.pos-wo .pos-dialog__close:focus-visible,
+.pos-dialog__close:focus-visible {
+  outline: 2px solid var(--t-primary);
+  outline-offset: 2px;
+}
+
+.pos-waiter-chip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  margin-bottom: 10px;
+  padding-inline-start: 12px;
+  padding-inline-end: 0;
+  border-radius: 10px;
+  border: 1px solid var(--t-primary);
+  background: color-mix(in srgb, var(--t-primary) 10%, transparent);
+  color: var(--t-text);
+  font-size: 0.8125rem;
+  font-weight: 700;
+}
+
+.pos-waiter-chip > svg {
+  color: var(--t-primary);
+  flex-shrink: 0;
+}
+
+.pos-waiter-chip__text {
+  flex: 1;
+  min-width: 0;
+}
+
+.pos-waiter-chip__x {
+  width: 44px;
+  height: 44px;
+  flex-shrink: 0;
+  border: none;
+  border-radius: 10px;
+  background: none;
+  color: var(--t-text-muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background 0.15s ease-out, color 0.15s ease-out;
+}
+
+.pos-waiter-chip__x:hover {
+  background: var(--t-hover);
+  color: var(--t-text);
+}
+
+.pos-wo {
+  display: flex;
+  flex-direction: column;
+  max-height: 85vh;
+}
+
+.pos-wo__head-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.pos-wo .pos-dialog__close {
+  width: 44px;
+  height: 44px;
+}
+
+.pos-wo .pos-dialog__close:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.pos-wo__body {
+  padding: 16px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  background: var(--t-bg);
+}
+
+.pos-wo__notice {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 10px;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  background: var(--t-surface-high);
+  color: var(--t-text-secondary);
+}
+
+.pos-wo__notice--warn {
+  background: rgba(217, 119, 6, 0.12);
+}
+
+.pos-wo__notice--warn svg {
+  color: #d97706;
+}
+
+.pos-wo__empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 40px 16px;
+  color: var(--t-text-faint);
+}
+
+.pos-wo__empty p {
+  margin: 0;
+  color: var(--t-text-dim);
+  font-size: 0.9rem;
+}
+
+.pos-wo__spin {
+  animation: pos-wo-spin 1s linear infinite;
+}
+
+@keyframes pos-wo-spin {
+  to { transform: rotate(360deg); }
+}
+
+.pos-wo-card {
+  background: var(--t-surface);
+  border: 1px solid var(--t-border-medium);
+  border-radius: 14px;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.pos-wo-card--active {
+  border-color: var(--t-primary);
+  box-shadow: 0 0 0 1px var(--t-primary);
+}
+
+.pos-wo-card__head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.pos-wo-card__table {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-width: 64px;
+  padding: 6px 10px;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--t-primary) 12%, transparent);
+  color: var(--t-primary);
+}
+
+.pos-wo-card__table-label {
+  font-size: 0.6875rem;
+  font-weight: 700;
+}
+
+.pos-wo-card__table-num {
+  font-size: 1.75rem;
+  font-weight: 800;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+}
+
+.pos-wo-card__meta {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.pos-wo-card__waiter,
+.pos-wo-card__time {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.pos-wo-card__waiter {
+  font-size: 0.9375rem;
+  font-weight: 700;
+  color: var(--t-text);
+}
+
+.pos-wo-card__time {
+  font-size: 0.8125rem;
+  color: var(--t-text-dim);
+}
+
+.pos-wo-card__tag {
+  font-size: 0.75rem;
+  font-weight: 700;
+  padding: 4px 10px;
+  border-radius: 10px;
+  background: var(--t-primary);
+  color: #fff;
+}
+
+.pos-wo-card__lines {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  border-top: 1px solid var(--t-border-subtle);
+  padding-top: 10px;
+}
+
+.pos-wo-card__line {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.pos-wo-card__line-main {
+  display: flex;
+  gap: 6px;
+  font-size: 0.9rem;
+  color: var(--t-text);
+}
+
+.pos-wo-card__qty {
+  font-weight: 800;
+  color: var(--t-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.pos-wo-card__line-note {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.8125rem;
+  color: var(--t-text-muted);
+  padding-inline-start: 22px;
+}
+
+.pos-wo-card__notes {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px dashed var(--t-border-strong);
+  background: var(--t-hover);
+  font-size: 0.8125rem;
+  color: var(--t-text-secondary);
+}
+
+.pos-wo-card__notes svg {
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.pos-wo-card__foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+  border-top: 1px solid var(--t-border-subtle);
+  padding-top: 10px;
+}
+
+.pos-wo-card__total {
+  display: flex;
+  flex-direction: column;
+  font-size: 0.75rem;
+  color: var(--t-text-dim);
+}
+
+.pos-wo-card__total strong {
+  font-size: 1rem;
+  color: var(--t-text);
+  font-variant-numeric: tabular-nums;
+}
+
+.pos-wo-card__actions {
+  display: flex;
+  gap: 8px;
+}
+
+.pos-wo-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 44px;
+  padding: 0 16px;
+  border-radius: 12px;
+  border: 1px solid transparent;
+  font-size: 0.875rem;
+  font-weight: 700;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background 0.18s ease-out, box-shadow 0.18s ease-out, border-color 0.18s ease-out;
+}
+
+.pos-wo-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.pos-wo-btn--primary {
+  background: linear-gradient(135deg, #046375, #1F7F90);
+  color: #fff;
+}
+
+.pos-wo-btn--primary:not(:disabled):hover {
+  box-shadow: 0 4px 16px rgba(4, 99, 117, 0.25);
+}
+
+.pos-wo-btn--danger {
+  background: none;
+  border-color: rgba(220, 38, 38, 0.45);
+  color: #dc2626;
+}
+
+.pos-wo-btn--danger:not(:disabled):hover {
+  background: rgba(220, 38, 38, 0.08);
+}
+
+.pos-wo-btn--danger-solid {
+  background: #dc2626;
+  color: #fff;
+}
+
+.pos-wo-btn--danger-solid:not(:disabled):hover {
+  background: #b91c1c;
+}
+
+.pos-wo-btn--ghost {
+  background: var(--t-hover);
+  border-color: var(--t-border-medium);
+  color: var(--t-text);
+}
+
+.pos-wo-btn--ghost:hover {
+  background: var(--t-surface-high);
+}
+
+.pos-dialog__head--danger {
+  background: linear-gradient(135deg, #b91c1c, #dc2626);
+}
+
+.pos-wo-confirm__text {
+  margin: 0;
+  font-size: 0.9375rem;
+  line-height: 1.7;
+  color: var(--t-text);
+}
+
+.pos-wo-confirm__foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.pos-wo-reasons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.pos-wo-reason {
+  min-height: 44px;
+  padding: 0 14px;
+  border-radius: 22px;
+  border: 1px solid var(--t-border-medium);
+  background: var(--t-hover);
+  color: var(--t-text);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background 0.15s ease-out, border-color 0.15s ease-out;
+}
+
+.pos-wo-reason--active {
+  border-color: #dc2626;
+  background: rgba(220, 38, 38, 0.1);
+  color: var(--t-text);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pos-waiter-btn--has .pos-waiter-btn__badge::after,
+  .pos-wo__spin {
+    animation: none;
+  }
+  .pos-waiter-btn,
+  .pos-waiter-chip__x,
+  .pos-wo-btn,
+  .pos-wo-reason {
+    transition: none;
+  }
+}
+
+@media (max-width: 600px) {
+  .pos-waiter-btn__label {
+    display: none;
+  }
 }
 
 /* ===== RESPONSIVE ===== */

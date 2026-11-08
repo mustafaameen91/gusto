@@ -18,6 +18,10 @@ const when = (iso) => {
   const d = iso ? new Date(iso) : new Date();
   return `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 };
+// Large, easy-to-call number: the sale's id ("#245"); the long reference (ORD-…) is printed small
+const shortNo = (o) => (o.orderId ? String(o.orderId) : String(o.orderNumber ?? "").replace(/^ORD-\d*(\d{4})$/, "$1"));
+const longRef = (o) => (o.orderNumber && String(o.orderNumber) !== shortNo(o) ? String(o.orderNumber) : "");
+
 // Placeholder notes the POS used to send by default
 const realNote = (n) => n && !["لاتوجد", "لا توجد", "بدون ملاحظات"].includes(String(n).trim());
 
@@ -67,12 +71,14 @@ function receipt(order, { width = 576 } = {}) {
       <div class="sub muted">Gusto Restaurant</div>
     </div>
     <div class="rule"></div>
-    <div class="row"><span>رقم الطلب</span><span class="order-no ltr">#${esc(order.orderNumber)}</span></div>
+    <div class="row"><span>رقم الطلب</span><span class="order-no ltr">#${esc(shortNo(order))}</span></div>
+    ${longRef(order) ? `<div class="row info muted"><span>المرجع</span><span class="ltr">${esc(longRef(order))}</span></div>` : ""}
     <div class="info">
       <div class="row"><span>التاريخ</span><span class="ltr">${when(order.createdAt)}</span></div>
       ${order.table ? `<div class="row"><span>الطاولة</span><span>${esc(order.table)}</span></div>` : ""}
       <div class="row"><span>الدفع</span><span>${pay}</span></div>
       ${order.cashierName ? `<div class="row"><span>الكاشير</span><span>${esc(order.cashierName)}</span></div>` : ""}
+      ${order.waiterName ? `<div class="row"><span>النادل</span><span>${esc(order.waiterName)}</span></div>` : ""}
     </div>
     <div class="rule"></div>
     ${items}
@@ -122,9 +128,11 @@ function ticket(order, station, items, { width = 576 } = {}) {
       .count { font-size: 23px; text-align: center; }
     </style>
     <div class="station">${esc(station.name)}</div>
-    <div class="order-no ltr" style="display:block">#${esc(order.orderNumber)}</div>
+    <div class="order-no ltr" style="display:block">#${esc(shortNo(order))}</div>
+    ${longRef(order) ? `<div class="center muted" style="font-size:20px"><span class="ltr">${esc(longRef(order))}</span></div>` : ""}
     <div class="row meta"><span class="ltr">${when(order.createdAt)}</span><span>${order.cashierName ? esc(order.cashierName) : ""}</span></div>
     ${order.table ? `<div class="table">طاولة ${esc(order.table)}</div>` : `<div class="table">سفري / بدون طاولة</div>`}
+    ${order.waiterName ? `<div class="meta center">النادل: ${esc(order.waiterName)}</div>` : ""}
     <div class="rule"></div>
     ${lines}
     ${realNote(order.notes) ? `<div class="box">ملاحظات الطلب: ${esc(order.notes)}</div>` : ""}

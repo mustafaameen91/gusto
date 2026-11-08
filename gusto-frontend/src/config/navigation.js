@@ -15,9 +15,10 @@ export const ROLE_LABELS = {
 const FRONT = ['admin', 'supervisor', 'cashier']
 
 export const PAGE_ROLES = {
-  '/dashboard': ['admin', 'supervisor', 'cashier', 'kitchen', 'waiter', 'purchases'],
+  '/dashboard': ['admin', 'supervisor', 'cashier', 'kitchen', 'purchases'],
   '/storage-dashboard': ['admin', 'storage'],
-  '/cashier': [...FRONT, 'waiter'],
+  '/waiter': ['waiter', 'admin', 'supervisor'], // tablet menu: orders go to the cashier
+  '/cashier': FRONT, // the till: only these roles take payment
   '/kitchen': ['admin', 'supervisor', 'kitchen'],
   '/barista': ['admin', 'supervisor', 'kitchen'],
   '/daily-receipt': FRONT,
@@ -56,13 +57,14 @@ export const canOpen = (role, path) => {
 }
 
 // The first page a role lands on after logging in
-export const homeFor = (role) => (role === 'storage' ? '/storage-dashboard' : '/dashboard')
+export const homeFor = (role) => (role === 'storage' ? '/storage-dashboard' : role === 'waiter' ? '/waiter' : '/dashboard')
 
 // Sidebar groups; each item is shown only to the roles allowed to open it
 export const NAV_GROUPS = [
   {
     title: 'نقطة البيع والعمليات',
     items: [
+      { to: '/waiter', label: 'طلبات الطاولات', icon: 'PhForkKnife' },
       { to: '/cashier', label: 'نقطة البيع', icon: 'PhCurrencyDollar' },
       { to: '/daily-receipt', label: 'صندوق اليومية', icon: 'PhReceipt' },
       { to: '/kitchen', label: 'شاشة المطبخ', icon: 'PhChefHat' },

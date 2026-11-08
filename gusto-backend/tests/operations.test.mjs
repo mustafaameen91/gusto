@@ -196,3 +196,52 @@ S.sizeDeleteKeepsHistory = async () => {
   check("size hidden from the menu", !(await call("GET", `/item-sizes/menu-item/${juice.idMenuItem}`)).data.some((z) => z.idItemSize === large));
   check("new orders with it refused", (await c.order([[juice, 1, 4000, large]])).status === 400);
 };
+
+S.waiterOrders = async () => {
+  console.log("Waiter tablet orders: sent to the cashier, turned into one paid sale, or rejected/cancelled");
+  const c = await ctx(); await c.shift();
+  const W = await login("waiter@gusto.com"), C = await login("cashier@gusto.com"), K = await login("kitchen@gusto.com");
+  const hummus = c.m("حمص بالطحينة"), juice = c.m("عصير برتقال طازج");
+  const send = (body, t = W) => call("POST", "/waiter-orders", body, t);
+  const items = [{ menuItemId: hummus.idMenuItem, quantity: 2, specialInstructions: "بدون ثوم" }, { menuItemId: juice.idMenuItem, quantity: 1 }];
+
+  check("waiter can no longer take payment directly", (await c.order([[hummus, 1]], { token: W })).status === 403);
+  check("kitchen cannot send waiter orders", (await send({ tableNumber: "3", items }, K)).status === 403);
+  check("table number required", (await send({ tableNumber: " ", items })).status === 400);
+  check("empty order refused", (await send({ tableNumber: "3", items: [] })).status === 400);
+  check("bad quantity refused", (await send({ tableNumber: "3", items: [{ menuItemId: hummus.idMenuItem, quantity: 0 }] })).status === 400);
+
+  const r = await send({ tableNumber: "5", notes: "عيد ميلاد", items });
+  const id = r.data.idWaiterOrder;
+  const expect = 2 * Number(hummus.basePrice) + Number(juice.basePrice);
+  check("waiter order saved with server prices", r.status === 201 && r.data.total === expect && r.data.items[0].itemName === hummus.itemName, JSON.stringify([r.status, r.data.total, expect]));
+  check("waiter cannot see the cashier queue", (await call("GET", "/waiter-orders", null, W)).status === 403);
+  const queue = (await call("GET", "/waiter-orders", null, C)).data;
+  check("cashier sees it waiting, with the waiter's name", queue.some((o) => o.idWaiterOrder === id && o.waiterName && o.tableNumber === "5"));
+
+  // The cashier sells it: one sale, and the waiter order is linked
+  const sale = await call("POST", "/orders", { orderType: "cashier", saleType: "cash", tableNumber: "5", waiterOrderId: id, discount: 0,
+    orderItems: r.data.items.map((i) => ({ menuItemId: i.menuItemId, quantity: i.quantity, itemSizeId: i.itemSizeId, specialInstructions: i.specialInstructions })) }, C);
+  check("cashier turns it into a sale", sale.status === 200 && Number(sale.data.totalAmount) === expect, JSON.stringify([sale.status, sale.data.totalAmount]));
+  const after = await one("SELECT CONCAT(status,'/',IFNULL(orderId,'-')) FROM WaiterOrders WHERE idWaiterOrder=?", [id]);
+  check("waiter order accepted and linked to the sale", after === `accepted/${sale.data.orderId}`, after);
+  const again = await call("POST", "/orders", { orderType: "cashier", saleType: "cash", waiterOrderId: id, orderItems: [{ menuItemId: hummus.idMenuItem, quantity: 1 }] }, C);
+  check("the same waiter order can't be sold twice", again.status === 409 && again.data.code === "WAITER_ORDER_TAKEN");
+  const mine = (await call("GET", "/waiter-orders/mine", null, W)).data;
+  check("waiter sees it accepted with the sale number", mine.find((o) => o.idWaiterOrder === id)?.orderNumber === sale.data.orderNumber);
+
+  // Reject and cancel
+  const r2 = (await send({ tableNumber: "8", items })).data.idWaiterOrder;
+  check("cashier rejects with a reason", (await call("PATCH", `/waiter-orders/${r2}/reject`, { reason: "الطاولة دفعت" }, C)).data.rejectReason === "الطاولة دفعت");
+  check("rejected order can't be sold", (await call("POST", "/orders", { orderType: "cashier", saleType: "cash", waiterOrderId: r2, orderItems: [{ menuItemId: hummus.idMenuItem, quantity: 1 }] }, C)).status === 409);
+  const r3 = (await send({ tableNumber: "9", items })).data.idWaiterOrder;
+  check("waiter cancels own pending order", (await call("PATCH", `/waiter-orders/${r3}/cancel`, null, W)).data.status === "cancelled");
+  check("cancelled order no longer waiting", !(await call("GET", "/waiter-orders", null, C)).data.some((o) => o.idWaiterOrder === r3));
+
+  // A sale that fails after taking the waiter order (dish sold out) puts it back in the queue
+  const r4 = (await send({ tableNumber: "10", items: [{ menuItemId: hummus.idMenuItem, quantity: 1 }] })).data.idWaiterOrder;
+  await sql("INSERT INTO KitchenItemStock (menuItemId, quantity) VALUES (?, 0) ON DUPLICATE KEY UPDATE quantity = 0", [hummus.idMenuItem]);
+  const bad = await call("POST", "/orders", { orderType: "cashier", saleType: "cash", waiterOrderId: r4, orderItems: [{ menuItemId: hummus.idMenuItem, quantity: 1 }] }, C);
+  check("sale refused: dish sold out", bad.status === 400 && bad.data.code === "INSUFFICIENT_KITCHEN_STOCK", JSON.stringify([bad.status, bad.data.code]));
+  check("…and the waiter order is back in the queue", (await one("SELECT CONCAT(status,'/',IFNULL(handledBy,'-')) FROM WaiterOrders WHERE idWaiterOrder=?", [r4])) === "pending/-");
+};

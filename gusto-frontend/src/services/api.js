@@ -360,4 +360,13 @@ export const customerAPI = {
   createReceipt: (id, data) => api.post(`/customers/${id}/receipts`, data),
 };
 
+// Waiter tablet orders: waiter sends → cashier POS loads into the cart and sells (or rejects)
+export const waiterOrderAPI = {
+  send: (data) => api.post("/waiter-orders", data),
+  mine: () => api.get("/waiter-orders/mine"),
+  pending: () => api.get("/waiter-orders", { params: { status: "pending" } }),
+  reject: (id, reason) => api.patch(`/waiter-orders/${id}/reject`, { reason }),
+  cancel: (id) => api.patch(`/waiter-orders/${id}/cancel`),
+};
+
 export default api;

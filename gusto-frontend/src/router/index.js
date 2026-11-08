@@ -26,6 +26,12 @@ const routes = [
     meta: { requiresAuth: true }
   },
   {
+    path: '/waiter',
+    name: 'WaiterMenu',
+    component: () => import('@/views/WaiterMenu.vue'),
+    meta: { requiresAuth: true }
+  },
+  {
     path: '/cashier',
     name: 'Cashier',
     component: () => import('@/views/Cashier.vue'),

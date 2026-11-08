@@ -97,6 +97,7 @@ require("./app/routes/postingSettings.routes")(app);
 require("./app/routes/journalEntry.routes")(app);
 require("./app/routes/payment.routes")(app);
 require("./app/routes/otherIncome.routes")(app);
+require("./app/routes/waiterOrder.routes")(app);
 
 // The built web app. Deploy: `cd gusto-frontend && npm run build:backend` writes it to
 // gusto-backend/public, so uploading the backend folder alone deploys the whole system.
@@ -187,6 +188,11 @@ io.on("connection", (socket) => {
   // Join cashier room
   socket.on("join_barista", () => {
     socket.join("barista");
+  });
+
+  // Waiter tablets: hear when the cashier takes or rejects their orders
+  socket.on("join_waiter", () => {
+    socket.join("waiter");
   });
 
   socket.on("join_cashier", () => {

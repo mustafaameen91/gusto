@@ -335,8 +335,17 @@ exports.create = async (req, res) => {
       customerPhone: req.body.customerPhone || null
     };
 
+    // From a waiter's tablet order: take it off the queue for this sale (only once, even with two cashiers)
+    const waiterOrders = require("./waiterOrder.controller");
+    const waiterOrderId = Number(req.body.waiterOrderId) || null;
+    if (waiterOrderId && !(await waiterOrders.claim(waiterOrderId, req.userId))) {
+      return res.status(409).json({ message: "طلب النادل هذا استُلم أو أُلغي بالفعل", code: "WAITER_ORDER_TAKEN" });
+    }
+    const releaseWaiterOrder = () => waiterOrderId && waiterOrders.release(waiterOrderId);
+
     reserveKitchenPortions(req.body.orderItems, (portionErr, releasePortions) => {
       if (portionErr) {
+        releaseWaiterOrder();
         return res.status(400).json({
           message: portionErr.message || "Insufficient kitchen stock.",
           code: "INSUFFICIENT_KITCHEN_STOCK"
@@ -345,6 +354,7 @@ exports.create = async (req, res) => {
     Order.create(order, req.body.orderItems, (err, data) => {
       if (err) {
         releasePortions();
+        releaseWaiterOrder();
         return res.status(500).json({
           message: err.message || "Error creating order."
         });
@@ -388,6 +398,7 @@ exports.create = async (req, res) => {
           });
         }
 
+        if (waiterOrderId) waiterOrders.complete(req, waiterOrderId, data.orderId).catch((e) => console.error("waiter order link:", e.message));
         res.json(data);
       }, openShift.idDailyReceipt);
     });
@@ -538,3 +549,4 @@ exports.getDailySummary = (req, res) => {
   });
 };
 
+exports.priceOrder = priceOrder;
