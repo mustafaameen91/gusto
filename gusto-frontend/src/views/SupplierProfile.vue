@@ -551,21 +551,17 @@ const paidFromAccountOptions = computed(() => {
   })
 })
 
-// Total debt (what we owe) before payments: initialDebt + unpaid purchases + service invoices
+// Total owed before payments: opening debt + received purchases + service invoices + transfers in
 const totalDebts = computed(() => {
   if (!profile.value) return 0
-  const initialDebt = parseFloat(profile.value.initialDebt || 0)
-  const unpaidPurchases = parseFloat(profile.value.unpaidPurchases || 0)
-  const totalServiceDebt = parseFloat(profile.value.totalServiceDebt || 0)
-  return initialDebt + unpaidPurchases + totalServiceDebt
+  const n = (v) => parseFloat(v || 0)
+  return n(profile.value.initialDebt) + n(profile.value.unpaidPurchases) + n(profile.value.totalServiceDebt) + n(profile.value.transferIn)
 })
 
-// Remaining = Total debts (includes services) − Total paid
+// Remaining comes from the server (same figure as the suppliers list)
 const remaining = computed(() => {
   if (!profile.value) return 0
-  const total = totalDebts.value
-  const paid = parseFloat(profile.value.totalPayments || 0)
-  return total - paid
+  return parseFloat(profile.value.currentDebt || 0)
 })
 
 const purchaseHeaders = [

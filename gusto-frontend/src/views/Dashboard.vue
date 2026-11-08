@@ -387,7 +387,14 @@ const loadDashboardData = async () => {
         stats.value.todayPurchases = 0
       }
 
-      stats.value.netProfit = stats.value.todaySales - stats.value.todayPurchases
+      // Same net profit as the Reports page (net sales − cost of goods − operating expenses + other income)
+      try {
+        const fin = await reportAPI.getFinancial({ startDate: today, endDate: today })
+        stats.value.netProfit = parseFloat(fin.data?.profit?.netProfit ?? 0)
+      } catch (err) {
+        console.error('Failed to load net profit:', err)
+        stats.value.netProfit = 0
+      }
 
       try {
         const profitResponse = await reportAPI.getProfitSinceOpening()

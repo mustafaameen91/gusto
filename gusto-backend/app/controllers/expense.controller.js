@@ -39,6 +39,43 @@ exports.uploadImage = (req, res) => {
 };
 
 // Create new expense (GL-connected: expenseCategoryId and paidFromAccountId required for proper posting)
+function attachToOpenShiftIfCash(expense, next) {
+  if (expense.dailyReceiptId) return next();
+  db.query(
+    `SELECT dr.idDailyReceipt, ps.cashAccountId
+     FROM DailyReceipts dr LEFT JOIN PostingSettings ps ON ps.name = 'default'
+     WHERE dr.isClosed = 0 ORDER BY dr.idDailyReceipt DESC LIMIT 1`,
+    (err, rows) => {
+      const row = !err && rows && rows[0];
+      const paidFromCash = row && (expense.paidFromAccountId == null || Number(expense.paidFromAccountId) === Number(row.cashAccountId));
+      if (paidFromCash) expense.dailyReceiptId = row.idDailyReceipt;
+      next();
+    }
+  );
+}
+
+// Amount must be a positive number; a payment to a supplier can't exceed what we owe them
+function validateExpenseAmount(body, excludeExpenseId, cb) {
+  const amount = Number(body.amount);
+  if (!Number.isFinite(amount) || amount <= 0) return cb("المبلغ يجب أن يكون رقماً أكبر من صفر");
+  if (!body.supplierId) return cb(null);
+  const Supplier = require("../models/supplier.model");
+  Supplier.getBalance(body.supplierId, (err, bal) => {
+    if (err) return cb("المورد غير موجود");
+    // When editing, the expense's own old amount is already counted as paid
+    const finish = (oldAmount) => {
+      const owed = parseFloat(bal.currentDebt || 0) + oldAmount;
+      if (amount > owed + 0.005) return cb(`المبلغ أكبر من المستحق للمورد (${owed.toLocaleString()} د.ع)`);
+      cb(null);
+    };
+    if (!excludeExpenseId) return finish(0);
+    db.query("SELECT amount, supplierId FROM Expenses WHERE idExpense = ?", [excludeExpenseId], (e, rows) => {
+      const old = rows && rows[0] && Number(rows[0].supplierId) === Number(body.supplierId) ? Number(rows[0].amount) : 0;
+      finish(old);
+    });
+  });
+}
+
 exports.create = (req, res) => {
   if (!req.body.expenseDate || !req.body.amount) {
     return res.status(400).json({
@@ -74,7 +111,11 @@ exports.create = (req, res) => {
     expense.photoUrl = req.body.photoUrl || null;
   }
 
-  Expense.create(expense, (err, data) => {
+  // Money paid from the cash box leaves the drawer of the open shift: attach it so
+  // the shift's expected cash drops. Bank-paid expenses don't touch the drawer.
+  validateExpenseAmount(req.body, null, (problem) => {
+    if (problem) return res.status(400).json({ message: problem });
+  attachToOpenShiftIfCash(expense, () => Expense.create(expense, (err, data) => {
     if (err) {
       return res.status(500).json({
         message: err.message || "Error creating expense."
@@ -95,10 +136,12 @@ exports.create = (req, res) => {
       expense.expenseCategoryId,
       expense.paidFromAccountId,
       expense.description || expense.category,
-      req.userId
+      req.userId,
+      expense.supplierId
     );
     
     res.json(data);
+  }));
   });
 };
 
@@ -147,6 +190,13 @@ exports.update = (req, res) => {
       message: "Expense date and amount are required!"
     });
   }
+  validateExpenseAmount(req.body, req.params.id, (problem) => {
+    if (problem) return res.status(400).json({ message: problem });
+    updateExpense(req, res);
+  });
+};
+
+function updateExpense(req, res) {
   if (req.body.expenseCategoryId == null || req.body.paidFromAccountId == null) {
     return res.status(400).json({
       message: "expenseCategoryId and paidFromAccountId are required for GL posting (دليل الحسابات)."
@@ -213,14 +263,15 @@ exports.update = (req, res) => {
           expense.expenseCategoryId,
           expense.paidFromAccountId,
           expense.description || expense.category,
-          req.userId
+          req.userId,
+          expense.supplierId
         );
         
         res.json(data);
       });
     });
   });
-};
+}
 
 // Delete expense
 exports.delete = (req, res) => {
@@ -296,16 +347,20 @@ exports.getTotal = (req, res) => {
  *   Debit  -> expense account (from ExpenseCategory.defaultAccountId)
  *   Credit -> paid-from account (paidFromAccountId, e.g. cash)
  */
-function createExpenseJournalEntry(expenseId, expenseDate, amount, expenseCategoryId, paidFromAccountId, description, userId) {
+function createExpenseJournalEntry(expenseId, expenseDate, amount, expenseCategoryId, paidFromAccountId, description, userId, supplierId) {
   db.query(
-    `SELECT defaultAccountId FROM ExpenseCategories WHERE idExpenseCategory = ?`,
+    `SELECT ec.defaultAccountId, ps.apAccountId
+     FROM ExpenseCategories ec LEFT JOIN PostingSettings ps ON ps.name = 'default'
+     WHERE ec.idExpenseCategory = ?`,
     [expenseCategoryId],
     (err, rows) => {
       if (err || !rows || rows.length === 0) {
         console.error('[expense] Could not find expense category for journal entry:', expenseCategoryId, err);
         return;
       }
-      const expenseAccountId = rows[0].defaultAccountId;
+      // Paying a supplier settles what we owe them (the goods are already in stock),
+      // so it debits the suppliers account instead of an expense account
+      const expenseAccountId = supplierId && rows[0].apAccountId ? rows[0].apAccountId : rows[0].defaultAccountId;
       if (!expenseAccountId) {
         console.error('[expense] Expense category has no defaultAccountId:', expenseCategoryId);
         return;

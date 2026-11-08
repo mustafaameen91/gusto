@@ -214,7 +214,13 @@ Expense.getByCategory = (category, startDate, endDate, result) => {
 // Total expenses for a shift (by dailyReceiptId)
 Expense.getTotalByShift = (dailyReceiptId, result) => {
   db.query(
-    "SELECT COALESCE(SUM(amount), 0) AS totalExpenses, COUNT(*) AS expenseCount FROM Expenses WHERE dailyReceiptId = ?",
+    // cashExpenses = paid from the cash box (drawer); only these reduce expected drawer cash
+    `SELECT COALESCE(SUM(e.amount), 0) AS totalExpenses,
+            COALESCE(SUM(CASE WHEN e.paidFromAccountId IS NULL OR e.paidFromAccountId = ps.cashAccountId THEN e.amount ELSE 0 END), 0) AS cashExpenses,
+            COUNT(*) AS expenseCount
+     FROM Expenses e
+     LEFT JOIN PostingSettings ps ON ps.name = 'default'
+     WHERE e.dailyReceiptId = ?`,
     [dailyReceiptId],
     (err, res) => {
       if (err) {

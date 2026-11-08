@@ -1,7 +1,5 @@
 const db = require("../models/db");
 const OrderReturn = require("../models/orderReturn.model");
-const KitchenItemStock = require("../models/kitchenItemStock.model");
-const DailyReceipt = require("../models/dailyReceipt.model");
 
 // Self-healing: ensure tables exist
 let _tablesChecked = false;
@@ -45,153 +43,164 @@ ensureTables();
 
 /**
  * POST /api/order-returns
- * Body: { orderId, returnType, refundMethod, customerId?, notes?, items: [...] }
- * Each item: { orderItemId, menuItemId, quantity, refundAmount, disposition, replacement* }
+ * Body: { orderId, refundMethod: 'cash'|'credit', customerId?, notes?, items: [...] }
+ * Each item: { orderItemId, quantity, disposition, replacementMenuItemId?, replacementItemSizeId?, replacementQuantity? }
+ *
+ * A return is an event of the shift it happens in; the original order keeps its total so
+ * closed shifts stay as posted. Everything below runs in one transaction:
+ *  - refund per item = what the customer paid for it (line price × the order's discount ratio)
+ *  - quantity limited to what is still on the order line (earlier returns are split off)
+ *  - replacements priced from the menu
+ *  - kitchen portions restored / used
+ * Shift close posts it: Dr revenue, Cr cash or receivables (replacements credited to revenue).
  */
 exports.create = (req, res) => {
   const { orderId, items } = req.body;
   if (!orderId || !items || !Array.isArray(items) || items.length === 0) {
     return res.status(400).json({ message: "orderId and items[] are required." });
   }
+  const refundMethod = req.body.refundMethod === "credit" ? "credit" : "cash";
+  const round2 = (n) => Math.round(n * 100) / 100;
 
-  // Only allow returns for today's orders — compare in MySQL to avoid timezone issues
-  db.query(
-    `SELECT o.*, (DATE(o.orderDate) = CURDATE()) AS isToday FROM Orders o WHERE o.idOrder = ?`,
-    [orderId],
-    (err, orderRows) => {
-      if (err) return res.status(500).json({ message: err.message });
-      if (!orderRows || orderRows.length === 0) {
-        return res.status(404).json({ message: "Order not found." });
-      }
+  db.getConnection((errConn, conn) => {
+    if (errConn) return res.status(500).json({ message: errConn.message });
+    // Returns nothing: inside the async handler, returning mysql2's query object would be awaited and throw
+    const fail = (status, message, code) => {
+      conn.rollback(() => { conn.release(); res.status(status).json({ message, ...(code && { code }) }); });
+    };
+    const q = (sql, params) => new Promise((resolve, reject) => conn.query(sql, params, (e, r) => (e ? reject(e) : resolve(r))));
 
-      const order = orderRows[0];
-
-      if (!order.isToday) {
-        return res.status(400).json({
-          message: "لا يمكن إرجاع طلبات من يوم سابق. الإرجاع فقط لطلبات اليوم.",
-          code: "RETURN_SAME_DAY_ONLY"
-        });
-      }
-
-      // Get current open shift
-      const today = new Date().toISOString().split("T")[0];
-      DailyReceipt.findByDate(today, (shiftErr, openShift) => {
-        const dailyReceiptId = (openShift && !openShift.isClosed)
-          ? (openShift.idDailyReceipt || openShift.id)
-          : (order.dailyReceiptId || null);
-
-        // Calculate total refund
-        let totalRefundAmount = 0;
-        items.forEach(i => {
-          const itemRefund = parseFloat(i.refundAmount) || 0;
-          const replacementCost = i.replacementPrice && i.replacementQuantity
-            ? parseFloat(i.replacementPrice) * parseInt(i.replacementQuantity)
-            : 0;
-          totalRefundAmount += (itemRefund - replacementCost);
-        });
-        if (totalRefundAmount < 0) totalRefundAmount = 0;
-
-        const hasExchange = items.some(i => i.replacementMenuItemId);
-        let returnType = req.body.returnType || 'refund';
-        if (hasExchange) returnType = 'exchange';
-        else if (items.every(i => i.disposition === 'wasted')) returnType = 'waste';
-
-        const returnData = {
-          orderId,
-          returnDate: new Date(),
-          processedBy: req.body.authenticatedById || req.userId,
-          returnType,
-          refundMethod: req.body.refundMethod || 'cash',
-          customerId: req.body.customerId || null,
-          totalRefundAmount,
-          notes: req.body.notes || null,
-          dailyReceiptId
-        };
-
-        OrderReturn.create(returnData, items, (createErr, result) => {
-          if (createErr) {
-            console.error("[orderReturn] Create error:", createErr);
-            return res.status(500).json({ message: createErr.message || "Error creating return." });
-          }
-
-          // Post-processing (async, non-blocking)
-          processReturnEffects(orderId, items, totalRefundAmount, dailyReceiptId, req);
-
-          res.json({
-            message: "تم تسجيل الإرجاع بنجاح",
-            return: result,
-            totalRefundAmount
-          });
-        });
-      });
-    }
-  );
-};
-
-/**
- * Handle side effects after return is created:
- * 1. Mark original order items as 'returned'
- * 2. Restore kitchen stock for returned_to_stock items
- * 3. Deduct kitchen stock for replacement items
- * 4. Adjust order total
- * 5. Add replacement OrderItems if exchange
- */
-function processReturnEffects(orderId, items, totalRefundAmount, dailyReceiptId, req) {
-  items.forEach(item => {
-    // 1. Mark original order item as returned
-    if (item.orderItemId) {
-      db.query(
-        `UPDATE OrderItems SET status = 'returned' WHERE idOrderItem = ? AND orderId = ?`,
-        [item.orderItemId, orderId],
-        (err) => { if (err) console.error("[orderReturn] Failed to mark item returned:", err); }
-      );
-    }
-
-    // 2. Restore kitchen stock if returned to stock
-    if (item.disposition === 'returned_to_stock' && item.menuItemId && item.quantity > 0) {
-      KitchenItemStock.add(item.menuItemId, item.quantity, (err) => {
-        if (err) console.error("[orderReturn] Failed to restore kitchen stock:", err);
-        else console.log(`[orderReturn] Restored ${item.quantity}x menuItem ${item.menuItemId} to kitchen stock`);
-      });
-    }
-
-    // 3. If exchange: deduct kitchen stock for replacement + add new OrderItem
-    if (item.replacementMenuItemId && item.replacementQuantity > 0) {
-      KitchenItemStock.decrease(item.replacementMenuItemId, item.replacementQuantity, (err) => {
-        if (err) console.error("[orderReturn] Failed to deduct replacement stock:", err);
-      });
-
-      db.query(
-        `INSERT INTO OrderItems (orderId, menuItemId, itemSizeId, quantity, price, specialInstructions, status)
-         VALUES (?, ?, ?, ?, ?, 'بديل - إرجاع', 'pending')`,
-        [orderId, item.replacementMenuItemId, item.replacementItemSizeId || null,
-         item.replacementQuantity, item.replacementPrice || 0],
-        (err) => {
-          if (err) console.error("[orderReturn] Failed to add replacement OrderItem:", err);
+    conn.beginTransaction(async (errTx) => {
+      if (errTx) { conn.release(); return res.status(500).json({ message: errTx.message }); }
+      try {
+        const [order] = await q(
+          "SELECT o.*, (DATE(o.orderDate) = CURDATE()) AS isToday FROM Orders o WHERE o.idOrder = ? FOR UPDATE",
+          [orderId]
+        );
+        if (!order) return fail(404, "Order not found.");
+        if (order.status === "cancelled") return fail(400, "لا يمكن إرجاع طلب ملغى");
+        if (!order.isToday) {
+          return fail(400, "لا يمكن إرجاع طلبات من يوم سابق. الإرجاع فقط لطلبات اليوم.", "RETURN_SAME_DAY_ONLY");
         }
-      );
-    }
-  });
+        const [shift] = await q("SELECT idDailyReceipt FROM DailyReceipts WHERE isClosed = 0 ORDER BY idDailyReceipt DESC LIMIT 1");
+        if (!shift) return fail(400, "يجب فتح الشفت أولاً قبل تسجيل الإرجاع", "NO_OPEN_SHIFT");
 
-  // 4. Adjust order total
-  if (totalRefundAmount > 0) {
-    db.query(
-      `UPDATE Orders SET totalAmount = GREATEST(0, totalAmount - ?) WHERE idOrder = ?`,
-      [totalRefundAmount, orderId],
-      (err) => {
-        if (err) console.error("[orderReturn] Failed to adjust order total:", err);
-        else console.log(`[orderReturn] Reduced order ${orderId} total by ${totalRefundAmount}`);
+        let customerId = null;
+        if (refundMethod === "credit") {
+          customerId = Number(req.body.customerId) || order.customerId || null;
+          if (!customerId) return fail(400, "اختر العميل عند الإرجاع على الحساب");
+        }
+
+        // What the customer actually paid per dinar of item price
+        const gross = Number(order.totalAmount) + Number(order.discount || 0);
+        const netRatio = gross > 0 ? Number(order.totalAmount) / gross : 1;
+
+        const lines = await q("SELECT * FROM OrderItems WHERE orderId = ? FOR UPDATE", [orderId]);
+        const lineById = new Map(lines.map((l) => [l.idOrderItem, l]));
+        const prepared = [];
+        for (const it of items) {
+          const line = lineById.get(Number(it.orderItemId));
+          if (!line) return fail(400, `الصنف ${it.orderItemId} لا يتبع هذا الطلب`);
+          if (["cancelled", "returned"].includes(line.status)) return fail(400, "هذا الصنف ملغى أو مُرجع مسبقاً");
+          const qty = Number(it.quantity);
+          if (!Number.isInteger(qty) || qty < 1) return fail(400, "كمية الإرجاع غير صحيحة");
+          if (qty > line.quantity) return fail(400, `لا يمكن إرجاع أكثر من ${line.quantity} من هذا الصنف`);
+          const refund = round2(Number(line.price) * qty * netRatio);
+
+          let replacement = null;
+          if (it.replacementMenuItemId) {
+            const rq = Number(it.replacementQuantity) || 1;
+            if (!Number.isInteger(rq) || rq < 1) return fail(400, "كمية البديل غير صحيحة");
+            const [m] = await q(
+              `SELECT mi.idMenuItem, mi.basePrice, mi.isActive, mi.isAvailable, c.isKitchen
+               FROM MenuItems mi JOIN Categories c ON c.idCategory = mi.categoryId
+               WHERE mi.idMenuItem = ?`,
+              [it.replacementMenuItemId]
+            );
+            if (!m || !m.isActive || !m.isAvailable) return fail(400, "الصنف البديل غير متاح");
+            let price = Number(m.basePrice);
+            const sizeId = Number(it.replacementItemSizeId) || null;
+            if (sizeId) {
+              const [z] = await q("SELECT priceAdjustment FROM ItemSizes WHERE idItemSize = ? AND menuItemId = ? AND isActive = 1", [sizeId, m.idMenuItem]);
+              if (!z) return fail(400, "حجم البديل غير صالح");
+              price += Number(z.priceAdjustment);
+            }
+            replacement = { menuItemId: m.idMenuItem, sizeId, qty: rq, price: round2(price), isKitchen: !!m.isKitchen };
+          }
+          prepared.push({ line, qty, refund, disposition: it.disposition === "returned_to_stock" ? "returned_to_stock" : "wasted", replacement });
+        }
+
+        const refundTotal = prepared.reduce((t, p) => t + p.refund, 0);
+        const replacementTotal = prepared.reduce((t, p) => t + (p.replacement ? p.replacement.price * p.replacement.qty : 0), 0);
+        // Negative = the customer pays the difference for a dearer replacement
+        const totalRefundAmount = round2(refundTotal - replacementTotal);
+        const returnType = prepared.some((p) => p.replacement) ? "exchange"
+          : prepared.every((p) => p.disposition === "wasted") ? "waste" : "refund";
+
+        const ins = await q("INSERT INTO OrderReturns SET ?", {
+          orderId: order.idOrder, returnDate: new Date(), processedBy: req.userId, returnType, refundMethod,
+          customerId, totalRefundAmount, notes: req.body.notes || null, dailyReceiptId: shift.idDailyReceipt,
+        });
+        const returnId = ins.insertId;
+
+        for (const p of prepared) {
+          const { line, qty } = p;
+          // Split the returned quantity onto its own line so item reports drop it
+          if (qty === line.quantity) {
+            await q("UPDATE OrderItems SET status = 'returned' WHERE idOrderItem = ?", [line.idOrderItem]);
+          } else {
+            await q("UPDATE OrderItems SET quantity = quantity - ? WHERE idOrderItem = ?", [qty, line.idOrderItem]);
+            line.quantity -= qty;
+            await q(
+              `INSERT INTO OrderItems (orderId, menuItemId, itemSizeId, quantity, price, specialInstructions, status)
+               VALUES (?, ?, ?, ?, ?, ?, 'returned')`,
+              [order.idOrder, line.menuItemId, line.itemSizeId, qty, line.price, line.specialInstructions]
+            );
+          }
+          if (p.disposition === "returned_to_stock") {
+            await q(
+              "INSERT INTO KitchenItemStock (menuItemId, quantity) VALUES (?, ?) ON DUPLICATE KEY UPDATE quantity = quantity + ?",
+              [line.menuItemId, qty, qty]
+            );
+          }
+          if (p.replacement) {
+            const r = p.replacement;
+            if (r.isKitchen) {
+              const upd = await q("UPDATE KitchenItemStock SET quantity = quantity - ? WHERE menuItemId = ? AND quantity >= ?", [r.qty, r.menuItemId, r.qty]);
+              if (!upd.affectedRows) return fail(400, "الكمية غير متوفرة في مخزن المطبخ للصنف البديل", "INSUFFICIENT_KITCHEN_STOCK");
+            }
+            await q(
+              `INSERT INTO OrderItems (orderId, menuItemId, itemSizeId, quantity, price, specialInstructions, status)
+               VALUES (?, ?, ?, ?, ?, 'بديل - إرجاع', 'pending')`,
+              [order.idOrder, r.menuItemId, r.sizeId, r.qty, r.price]
+            );
+          }
+          await q(
+            `INSERT INTO OrderReturnItems (orderReturnId, orderItemId, menuItemId, quantity, refundAmount, disposition,
+               replacementMenuItemId, replacementItemSizeId, replacementQuantity, replacementPrice)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [returnId, line.idOrderItem, line.menuItemId, qty, p.refund, p.disposition,
+             p.replacement?.menuItemId || null, p.replacement?.sizeId || null, p.replacement?.qty || null, p.replacement?.price ?? null]
+          );
+        }
+
+        conn.commit((errCommit) => {
+          if (errCommit) return fail(500, errCommit.message);
+          conn.release();
+          const io = req.app.get("io");
+          if (io) {
+            io.to("kitchen").emit("order_return", { orderId: order.idOrder });
+            io.to("cashier").emit("order_return", { orderId: order.idOrder });
+          }
+          res.json({ message: "تم تسجيل الإرجاع بنجاح", return: { idOrderReturn: returnId, returnType, refundMethod }, totalRefundAmount });
+        });
+      } catch (e) {
+        console.error("[orderReturn] Create error:", e.message);
+        fail(500, e.message || "Error creating return.");
       }
-    );
-  }
-
-  // 5. Emit WebSocket event
-  const io = req.app.get("io");
-  if (io) {
-    io.to("kitchen").emit("order_return", { orderId });
-    io.to("cashier").emit("order_return", { orderId });
-  }
-}
+    });
+  });
+};
 
 /**
  * GET /api/order-returns?orderId=X

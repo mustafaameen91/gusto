@@ -135,26 +135,27 @@ exports.getProfile = (req, res) => {
             });
           }
           const invoices = serviceInvoices || [];
-          const totalServiceDebt = invoices.reduce((sum, inv) => sum + parseFloat(inv.totalAmount || 0), 0);
-          const totalPayments = parseFloat(data.totalPayments) || 0;
-          const initialDebt = parseFloat(data.initialDebt) || 0;
-          const unpaidPurchases = parseFloat(data.unpaidPurchases) || 0;
-          const transferOut = parseFloat(data.transferOut) || 0;
-          const transferIn = parseFloat(data.transferIn) || 0;
-          const currentDebt = initialDebt + unpaidPurchases + totalServiceDebt - totalPayments - transferOut + transferIn;
-
-          res.json({
-            ...data,
-            totalPayments,
-            currentDebt,
-            initialDebt,
-            unpaidPurchases,
-            totalServiceDebt,
-            transferOut,
-            transferIn,
-            serviceInvoices: invoices,
-            expenses: expenses || [],
-            purchases: purchases || []
+          // Every figure comes from the same balance definition as the suppliers list
+          Supplier.getBalance(supplierId, (errBal, bal) => {
+            if (errBal) {
+              return res.status(500).json({ message: errBal.message || "Error retrieving supplier balance." });
+            }
+            const n = (v) => parseFloat(v) || 0;
+            res.json({
+              ...data,
+              initialDebt: n(bal.initialDebt),
+              unpaidPurchases: n(bal.unpaidPurchases),
+              totalServiceDebt: n(bal.totalServiceDebt),
+              // paid = payments recorded for the supplier + expenses paid to the supplier
+              totalPayments: n(bal.totalPayments) + n(bal.totalExpensePayments),
+              totalCredits: n(bal.totalCredits),
+              transferOut: n(bal.transferOut),
+              transferIn: n(bal.transferIn),
+              currentDebt: n(bal.currentDebt),
+              serviceInvoices: invoices,
+              expenses: expenses || [],
+              purchases: purchases || []
+            });
           });
         });
       });
@@ -217,7 +218,20 @@ exports.createPayment = (req, res) => {
       message: "Amount and payment date are required!"
     });
   }
+  const amount = Number(req.body.amount);
+  if (!Number.isFinite(amount) || amount <= 0) {
+    return res.status(400).json({ message: "المبلغ يجب أن يكون رقماً أكبر من صفر" });
+  }
+  Supplier.getBalance(req.params.id, (errBal, bal) => {
+    if (errBal) return res.status(404).json({ message: "المورد غير موجود" });
+    if (amount > parseFloat(bal.currentDebt || 0) + 0.005) {
+      return res.status(400).json({ message: `المبلغ أكبر من المستحق للمورد (${parseFloat(bal.currentDebt || 0).toLocaleString()} د.ع)` });
+    }
+    recordSupplierPayment(req, res, amount);
+  });
+};
 
+function recordSupplierPayment(req, res, amount) {
   const payment = new SupplierPayment({
     supplierId: req.params.id,
     amount: parseFloat(req.body.amount),
@@ -233,9 +247,29 @@ exports.createPayment = (req, res) => {
         message: err.message || "Error creating payment."
       });
     }
-    res.status(201).json(data);
+    // Books: Dr suppliers (we owe less), Cr cash box or bank
+    const memo = `دفعة للمورد #${req.params.id}`;
+    db.query(
+      `INSERT INTO JournalEntries (entryDate, sourceType, sourceId, status, memo, createdBy, postedBy, postedAt)
+       SELECT ?, 'SUPPLIER_PAYMENT', ?, 'POSTED', ?, ?, ?, NOW() FROM DUAL`,
+      [payment.paymentDate, data.id || null, memo, req.userId, req.userId],
+      (errJe, je) => {
+        if (errJe) console.error("[supplier] payment journal entry failed:", errJe.message);
+        else {
+          db.query(
+            `INSERT INTO JournalLines (journalEntryId, accountId, debit, credit, lineMemo)
+             SELECT ?, ps.apAccountId, ?, 0, ? FROM PostingSettings ps WHERE ps.name = 'default'
+             UNION ALL
+             SELECT ?, IF(? = 'cash', ps.cashAccountId, COALESCE(ps.bankAccountId, ps.cashAccountId)), 0, ?, ? FROM PostingSettings ps WHERE ps.name = 'default'`,
+            [je.insertId, amount, memo, je.insertId, payment.paymentMethod, amount, memo],
+            (errL) => { if (errL) console.error("[supplier] payment journal lines failed:", errL.message); }
+          );
+        }
+        res.status(201).json(data);
+      }
+    );
   });
-};
+}
 
 // Get payments for supplier
 exports.getPayments = (req, res) => {
@@ -255,6 +289,9 @@ exports.createCredit = (req, res) => {
     return res.status(400).json({
       message: "Amount and credit date are required!"
     });
+  }
+  if (!(Number(req.body.amount) > 0)) {
+    return res.status(400).json({ message: "المبلغ يجب أن يكون رقماً أكبر من صفر" });
   }
 
   const credit = new SupplierCredit({

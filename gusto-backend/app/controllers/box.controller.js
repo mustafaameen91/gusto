@@ -108,55 +108,26 @@ exports.getBalance = (req, res) => {
       return; // Exit early
     }
     
-    // We have an open receipt
-    const openingCash = parseFloat(receipt.openingCash || 0);
-    
-    // Get today's sales
-    Order.getDailySummary(today, (err, salesSummary) => {
-      const totalSales = parseFloat(salesSummary?.totalSales || 0);
-      
-      // Get today's expenses
-      Expense.getTotal(today, today, (err, expenseTotal) => {
-        const totalExpenses = parseFloat(expenseTotal?.totalExpenses || 0);
-        
-        // Get today's purchases (received purchases only)
-        const purchaseQuery = `
-          SELECT COALESCE(SUM(totalAmount), 0) as totalPurchases
-          FROM Purchases
-          WHERE DATE(purchaseDate) = ? 
-            AND status IN ('received', 'partially_received')
-        `;
-        
-        db.query(purchaseQuery, [today], (err, purchaseResult) => {
-          if (err) {
-            return res.status(500).json({
-              message: err.message || "Error retrieving purchases."
-            });
-          }
-          
-          const totalPurchases = parseFloat(purchaseResult[0]?.totalPurchases || 0);
-
-          // Other incomes (cash): shift-linked + unlinked for today — add to box balance
-          OtherIncome.getTotalsForBox(receipt.receiptDate, receipt.idDailyReceipt, (oiErr, oiTotals) => {
-            const otherIncomesCash = oiTotals && !oiErr ? (oiTotals.cashTotal || 0) : 0;
-            const currentBalance = openingCash + totalSales - totalExpenses - totalPurchases + otherIncomesCash;
-            const expectedBalance = openingCash + totalSales - totalExpenses - totalPurchases + otherIncomesCash;
-            
-            res.json({
-              openingCash: openingCash,
-              totalSales: totalSales,
-              totalExpenses: totalExpenses,
-              totalPurchases: totalPurchases,
-              totalOtherIncomes: oiTotals && !oiErr ? (oiTotals.total || 0) : 0,
-              otherIncomesCash: otherIncomesCash,
-              currentBalance: currentBalance,
-              expectedBalance: expectedBalance,
-              receiptDate: receipt.receiptDate,
-              isOpen: !receipt.isClosed || false,
-              isClosed: false
-            });
-          });
-        });
+    // Open shift: the box holds exactly what the shift screen expects in the drawer
+    const { withShiftCash } = require("./dailyReceipt.controller");
+    withShiftCash({ ...receipt }, (shift) => {
+      res.json({
+        openingCash: parseFloat(receipt.openingCash || 0),
+        totalSales: shift.totalSales,
+        cashSales: shift.cashSales,
+        cardSales: shift.cardSales,
+        creditSales: shift.creditSales,
+        totalExpenses: shift.totalExpenses,
+        cashExpenses: shift.cashExpenses,
+        totalPurchases: 0,
+        totalOtherIncomes: shift.totalOtherIncomes,
+        otherIncomesCash: shift.otherIncomesCash,
+        customerCash: shift.customerCash,
+        currentBalance: shift.expectedCash,
+        expectedBalance: shift.expectedCash,
+        receiptDate: receipt.receiptDate,
+        isOpen: !receipt.isClosed,
+        isClosed: false
       });
     });
   });
@@ -164,88 +135,37 @@ exports.getBalance = (req, res) => {
 
 // Get box summary (daily/weekly/monthly)
 exports.getSummary = (req, res) => {
+  const { todayBusinessDate, addDays, businessWindow } = require("../services/businessDay");
   const period = req.query.period || 'today'; // today, week, month
-  const today = new Date();
-  let startDate, endDate;
-  
-  switch(period) {
+  const today = todayBusinessDate();
+  let startDate, endDate = today;
+  switch (period) {
     case 'today':
-      startDate = today.toISOString().split('T')[0];
-      endDate = startDate;
+      startDate = today;
       break;
-    case 'week':
-      startDate = new Date(today);
-      startDate.setDate(today.getDate() - 7);
-      startDate = startDate.toISOString().split('T')[0];
-      endDate = today.toISOString().split('T')[0];
+    case 'week': // the last 7 business days including today
+      startDate = addDays(today, -6);
       break;
     case 'month':
-      startDate = new Date(today.getFullYear(), today.getMonth(), 1);
-      startDate = startDate.toISOString().split('T')[0];
-      endDate = today.toISOString().split('T')[0];
+      startDate = today.slice(0, 8) + '01';
       break;
     default:
-      startDate = req.query.startDate || today.toISOString().split('T')[0];
-      endDate = req.query.endDate || today.toISOString().split('T')[0];
+      startDate = req.query.startDate || today;
+      endDate = req.query.endDate || today;
   }
-  
-  // Helper function to get cafe day range (7 AM to 2:59 AM next day)
-  const getCafeDayRange = (date) => {
-    const selectedDate = new Date(date + 'T00:00:00');
-    const startDate = new Date(selectedDate);
-    startDate.setHours(7, 0, 0, 0);
-    
-    const endDate = new Date(selectedDate);
-    endDate.setDate(endDate.getDate() + 1);
-    endDate.setHours(2, 59, 59, 999);
-    
-    const formatDateForMySQL = (date) => {
-      const year = date.getFullYear();
-      const month = String(date.getMonth() + 1).padStart(2, '0');
-      const day = String(date.getDate()).padStart(2, '0');
-      const hours = String(date.getHours()).padStart(2, '0');
-      const minutes = String(date.getMinutes()).padStart(2, '0');
-      const seconds = String(date.getSeconds()).padStart(2, '0');
-      return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
-    };
-    
-    return {
-      startDateTime: formatDateForMySQL(startDate),
-      endDateTime: formatDateForMySQL(endDate)
-    };
-  };
-  
-  // For "today" period, use cafe day logic. For ranges, use simple date comparison
-  let salesQuery, salesParams;
-  if (period === 'today') {
-    const cafeDay = getCafeDayRange(startDate);
-    salesQuery = `
-      SELECT 
-        COALESCE(SUM(totalAmount), 0) as totalSales,
-        COUNT(*) as orderCount
-      FROM Orders
-      WHERE orderDate >= ? AND orderDate <= ?
-        AND status != 'cancelled'
-    `;
-    salesParams = [cafeDay.startDateTime, cafeDay.endDateTime];
-  } else {
-    // For week/month ranges, use simple date comparison (start of first day to end of last day)
-    const rangeStart = new Date(startDate + 'T00:00:00');
-    const rangeEnd = new Date(endDate + 'T23:59:59');
-    salesQuery = `
-      SELECT 
-        COALESCE(SUM(totalAmount), 0) as totalSales,
-        COUNT(*) as orderCount
-      FROM Orders
-      WHERE orderDate >= ? AND orderDate <= ?
-        AND status != 'cancelled'
-    `;
-    salesParams = [
-      rangeStart.toISOString().slice(0, 19).replace('T', ' '),
-      rangeEnd.toISOString().slice(0, 19).replace('T', ' ')
-    ];
-  }
-  
+
+  // Sales over the same business-day window as every other report (07:00 → 02:59)
+  const window = businessWindow(startDate, endDate);
+  const salesQuery = `
+    SELECT
+      COALESCE(SUM(totalAmount), 0) as totalSales,
+      COUNT(*) as orderCount
+    FROM Orders
+    WHERE orderDate >= ? AND orderDate <= ?
+      AND status != 'cancelled'
+  `;
+  const salesParams = [window.startDateTime, window.endDateTime];
+
   // Get expenses
   Expense.getTotal(startDate, endDate, (err, expenseTotal) => {
     const totalExpenses = parseFloat(expenseTotal?.totalExpenses || 0);
@@ -279,9 +199,9 @@ exports.getSummary = (req, res) => {
         const totalPurchases = parseFloat(purchaseResult[0]?.totalPurchases || 0);
         const purchaseCount = parseInt(purchaseResult[0]?.purchaseCount || 0);
         
-        // Net Profit = Sales Revenue - Cost of Sales (Purchases)
-        const netProfit = totalSales - totalPurchases;
-        
+        const { profitForPeriod } = require("../services/profit.service");
+        profitForPeriod(startDate, endDate, (errProfit, pf) => {
+        if (errProfit) return res.status(500).json({ message: errProfit.message });
         res.json({
           period: period,
           startDate: startDate,
@@ -289,10 +209,13 @@ exports.getSummary = (req, res) => {
           totalSales: totalSales,
           totalExpenses: totalExpenses,
           totalPurchases: totalPurchases,
-          netProfit: netProfit,
+          netProfit: pf.netProfit,
+          grossProfit: pf.grossProfit,
+          cogs: pf.cogs,
           orderCount: orderCount,
           purchaseCount: purchaseCount,
           expenseCount: expenseTotal?.expenseCount || 0
+        });
         });
       });
     });

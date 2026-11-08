@@ -5,7 +5,6 @@ const Staff = require("../models/staff.model");
 exports.login = (req, res) => {
   console.log("\n🔐 ===== LOGIN ATTEMPT =====");
   console.log("📧 Email received:", req.body.email);
-  console.log("🔑 Password received:", req.body.password ? "***" + req.body.password.substring(req.body.password.length - 3) : "EMPTY");
   
   if (!req.body.email || !req.body.password) {
     console.log("❌ Missing email or password");
@@ -34,7 +33,6 @@ exports.login = (req, res) => {
     console.log("   Email:", staff.email);
     console.log("   Role:", staff.role);
     console.log("   Active:", staff.isActive);
-    console.log("   Password hash:", staff.password ? staff.password.substring(0, 30) + "..." : "EMPTY");
 
     // Check if staff is active
     if (!staff.isActive) {
@@ -46,8 +44,6 @@ exports.login = (req, res) => {
 
     // Verify password
     console.log("🔐 Comparing passwords...");
-    console.log("   Input password:", req.body.password);
-    console.log("   Stored hash:", staff.password.substring(0, 30) + "...");
     
     const passwordIsValid = bcrypt.compareSync(req.body.password, staff.password);
     

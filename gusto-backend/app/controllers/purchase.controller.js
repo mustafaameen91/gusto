@@ -65,20 +65,8 @@ exports.create = (req, res) => {
         });
       }
 
-      if (paymentType === 'cash' && purchase.supplierId && data.idPurchase) {
-        const payment = {
-          supplierId: purchase.supplierId,
-          amount: parseFloat(purchase.totalAmount) || 0,
-          paymentDate: purchase.purchaseDate,
-          paymentMethod: 'cash',
-          recordedBy: req.userId,
-          notes: `دفع مقابل أمر شراء ${purchase.purchaseNumber}` || null
-        };
-        SupplierPayment.create(payment, (payErr) => {
-          if (payErr) console.error("Supplier payment (pay-now) error:", payErr);
-        });
-      }
-
+      // Cash purchases are never owed to the supplier; they are paid from the cash box
+      // when the goods are received (posted then: Dr inventory, Cr cash box).
       res.json(data);
     });
   });
@@ -140,8 +128,8 @@ exports.receive = (req, res) => {
 
   Purchase.receive(req.params.id, req.body.items, req.userId, (err, data) => {
     if (err) {
-      console.error('❌ Error receiving purchase:', err);
-      return res.status(500).json({
+      console.error('❌ Error receiving purchase:', err.message || err);
+      return res.status(err.status || 500).json({
         message: err.message || "Error receiving purchase."
       });
     }
@@ -217,6 +205,9 @@ exports.delete = (req, res) => {
         return res.status(404).json({
           message: `Purchase not found with id ${req.params.id}.`
         });
+      }
+      if (err.kind === "has_received") {
+        return res.status(409).json({ message: err.message });
       }
       return res.status(500).json({
         message: "Could not delete purchase with id " + req.params.id

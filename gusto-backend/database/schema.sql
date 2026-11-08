@@ -726,7 +726,7 @@ INSERT IGNORE INTO `Accounts` (`idAccount`, `code`, `name`, `accountType`, `pare
 INSERT IGNORE INTO `Accounts` (`idAccount`, `code`, `name`, `accountType`, `parentId`, `isActive`, `createdAt`, `updatedAt`) VALUES (29,'6106','صيانة','EXPENSE',6,1,NOW(),NOW());
 INSERT IGNORE INTO `Accounts` (`idAccount`, `code`, `name`, `accountType`, `parentId`, `isActive`, `createdAt`, `updatedAt`) VALUES (30,'6108','مصاريف تشغيلية أخرى','EXPENSE',6,1,NOW(),NOW());
 
-INSERT IGNORE INTO `PostingSettings` (`idPosting`, `name`, `cashAccountId`, `bankAccountId`, `arAccountId`, `apAccountId`, `inventoryAccountId`, `cogsAccountId`, `wastageAccountId`, `salesBeveragesAccountId`, `salesDessertsAccountId`, `tipsAccountId`, `createdAt`) VALUES (1,'default',13,14,10,18,16,22,23,20,21,NULL,NOW());
+INSERT IGNORE INTO `PostingSettings` (`idPosting`, `name`, `cashAccountId`, `bankAccountId`, `arAccountId`, `apAccountId`, `inventoryAccountId`, `cogsAccountId`, `wastageAccountId`, `salesBeveragesAccountId`, `salesDessertsAccountId`, `tipsAccountId`, `createdAt`) VALUES (1,'default',13,14,15,18,16,22,23,20,21,NULL,NOW());
 
 INSERT IGNORE INTO `ExpenseCategories` (`idExpenseCategory`, `name`, `defaultAccountId`, `isActive`) VALUES (1,'ايجار',24,1);
 INSERT IGNORE INTO `ExpenseCategories` (`idExpenseCategory`, `name`, `defaultAccountId`, `isActive`) VALUES (2,'كهرباء',25,1);

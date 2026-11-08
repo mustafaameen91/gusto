@@ -146,7 +146,6 @@ exports.createReceipt = (req, res) => {
     receiptDate: req.body.receiptDate || new Date().toISOString().slice(0, 10),
     amount,
     paymentMethod: req.body.paymentMethod || "cash",
-    dailyReceiptId: req.body.dailyReceiptId || null,
     recordedBy: req.userId || null,
     notes: req.body.notes || null,
     allocations: Array.isArray(req.body.allocations) ? req.body.allocations : []
@@ -154,7 +153,7 @@ exports.createReceipt = (req, res) => {
 
   Customer.createReceipt(receiptData, (err, data) => {
     if (err) {
-      return res.status(500).json({
+      return res.status(err.status || 500).json({
         message: err.message || "Error creating customer receipt."
       });
     }

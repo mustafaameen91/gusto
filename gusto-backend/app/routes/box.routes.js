@@ -1,4 +1,5 @@
 module.exports = (app) => {
+  const { requireRole } = require("../middleware/role.middleware");
   const box = require("../controllers/box.controller");
   const authMiddleware = require("../middleware/auth.middleware");
 
@@ -8,22 +9,23 @@ module.exports = (app) => {
   router.use(authMiddleware.verifyToken);
 
   // Get current cash box balance
-  router.get("/balance", box.getBalance);
+  const boxViewers = requireRole(["admin", "cashier", "supervisor"]);
+  router.get("/balance", boxViewers, box.getBalance);
 
   // Get box summary (daily/weekly/monthly)
-  router.get("/summary", box.getSummary);
+  router.get("/summary", requireRole(["admin"]), box.getSummary);
 
   // Get all transactions
-  router.get("/transactions", box.getTransactions);
+  router.get("/transactions", boxViewers, box.getTransactions);
 
   // Get per-account balances (from JournalLines)
-  router.get("/account-balances", box.getAccountBalances);
+  router.get("/account-balances", boxViewers, box.getAccountBalances);
 
   // Get transactions for a specific account
-  router.get("/account-transactions/:accountId", box.getAccountTransactions);
+  router.get("/account-transactions/:accountId", boxViewers, box.getAccountTransactions);
 
   // Transfer money between boxes/accounts (cash ↔ bank)
-  router.post("/transfer", box.transfer);
+  router.post("/transfer", requireRole(["admin"]), box.transfer);
 
   app.use("/api/box", router);
 };

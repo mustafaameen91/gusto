@@ -157,8 +157,8 @@ DailyReceipt.close = (id, closingData, result) => {
 
 DailyReceipt.updateTotals = (id, totals, result) => {
   db.query(
-    "UPDATE DailyReceipts SET totalSales = ?, totalExpenses = ?, expectedCash = openingCash + ? - ? WHERE idDailyReceipt = ?",
-    [totals.totalSales, totals.totalExpenses, totals.totalSales, totals.totalExpenses, id],
+    "UPDATE DailyReceipts SET totalSales = COALESCE(?, totalSales), totalExpenses = COALESCE(?, totalExpenses) WHERE idDailyReceipt = ?",
+    [totals.totalSales ?? null, totals.totalExpenses ?? null, id],
     (err, res) => {
       if (err) {
         result(err, null);

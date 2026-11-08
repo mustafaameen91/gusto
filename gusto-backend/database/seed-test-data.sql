@@ -20,22 +20,22 @@ SET NAMES utf8mb4;
 
 -- Staff -------------------------------------------------------------------
 INSERT INTO `Staff` (`fullName`, `email`, `phone`, `password`, `role`, `hireDate`, `salary`, `isActive`)
-SELECT 'مدير الصالة', 'supervisor@gusto.com', '07700000002', '$2a$10$IosieKTRjSMhqng3iHat2OmoExS/8CeZhhVh6HtUyewwaNaxoFGq.', 'supervisor', CURDATE(), 900000, 1 FROM DUAL
+SELECT 'مدير الصالة', 'supervisor@gusto.com', '07700000002', '$2a$10$9537bYshi0CQOta1NX6phuKP6lzUFXn8BpcO/7ghQ6gUX0oXGJWxG', 'supervisor', CURDATE(), 900000, 1 FROM DUAL
 WHERE NOT EXISTS (SELECT 1 FROM `Staff` WHERE `email` = 'supervisor@gusto.com');
 INSERT INTO `Staff` (`fullName`, `email`, `phone`, `password`, `role`, `hireDate`, `salary`, `isActive`)
-SELECT 'الكاشير', 'cashier@gusto.com', '07700000003', '$2a$10$IosieKTRjSMhqng3iHat2OmoExS/8CeZhhVh6HtUyewwaNaxoFGq.', 'cashier', CURDATE(), 700000, 1 FROM DUAL
+SELECT 'الكاشير', 'cashier@gusto.com', '07700000003', '$2a$10$9537bYshi0CQOta1NX6phuKP6lzUFXn8BpcO/7ghQ6gUX0oXGJWxG', 'cashier', CURDATE(), 700000, 1 FROM DUAL
 WHERE NOT EXISTS (SELECT 1 FROM `Staff` WHERE `email` = 'cashier@gusto.com');
 INSERT INTO `Staff` (`fullName`, `email`, `phone`, `password`, `role`, `hireDate`, `salary`, `isActive`)
-SELECT 'الشيف', 'kitchen@gusto.com', '07700000004', '$2a$10$IosieKTRjSMhqng3iHat2OmoExS/8CeZhhVh6HtUyewwaNaxoFGq.', 'kitchen', CURDATE(), 900000, 1 FROM DUAL
+SELECT 'الشيف', 'kitchen@gusto.com', '07700000004', '$2a$10$9537bYshi0CQOta1NX6phuKP6lzUFXn8BpcO/7ghQ6gUX0oXGJWxG', 'kitchen', CURDATE(), 900000, 1 FROM DUAL
 WHERE NOT EXISTS (SELECT 1 FROM `Staff` WHERE `email` = 'kitchen@gusto.com');
 INSERT INTO `Staff` (`fullName`, `email`, `phone`, `password`, `role`, `hireDate`, `salary`, `isActive`)
-SELECT 'النادل', 'waiter@gusto.com', '07700000005', '$2a$10$IosieKTRjSMhqng3iHat2OmoExS/8CeZhhVh6HtUyewwaNaxoFGq.', 'waiter', CURDATE(), 500000, 1 FROM DUAL
+SELECT 'النادل', 'waiter@gusto.com', '07700000005', '$2a$10$9537bYshi0CQOta1NX6phuKP6lzUFXn8BpcO/7ghQ6gUX0oXGJWxG', 'waiter', CURDATE(), 500000, 1 FROM DUAL
 WHERE NOT EXISTS (SELECT 1 FROM `Staff` WHERE `email` = 'waiter@gusto.com');
 INSERT INTO `Staff` (`fullName`, `email`, `phone`, `password`, `role`, `hireDate`, `salary`, `isActive`)
-SELECT 'المشتريات', 'purchases@gusto.com', '07700000006', '$2a$10$IosieKTRjSMhqng3iHat2OmoExS/8CeZhhVh6HtUyewwaNaxoFGq.', 'purchases', CURDATE(), 700000, 1 FROM DUAL
+SELECT 'المشتريات', 'purchases@gusto.com', '07700000006', '$2a$10$9537bYshi0CQOta1NX6phuKP6lzUFXn8BpcO/7ghQ6gUX0oXGJWxG', 'purchases', CURDATE(), 700000, 1 FROM DUAL
 WHERE NOT EXISTS (SELECT 1 FROM `Staff` WHERE `email` = 'purchases@gusto.com');
 INSERT INTO `Staff` (`fullName`, `email`, `phone`, `password`, `role`, `hireDate`, `salary`, `isActive`)
-SELECT 'أمين المخزن', 'storage@gusto.com', '07700000007', '$2a$10$IosieKTRjSMhqng3iHat2OmoExS/8CeZhhVh6HtUyewwaNaxoFGq.', 'storage', CURDATE(), 700000, 1 FROM DUAL
+SELECT 'أمين المخزن', 'storage@gusto.com', '07700000007', '$2a$10$9537bYshi0CQOta1NX6phuKP6lzUFXn8BpcO/7ghQ6gUX0oXGJWxG', 'storage', CURDATE(), 700000, 1 FROM DUAL
 WHERE NOT EXISTS (SELECT 1 FROM `Staff` WHERE `email` = 'storage@gusto.com');
 
 -- Ingredients (main store = Ingredients.currentStock) ----------------------
@@ -97,7 +97,46 @@ INSERT INTO `Ingredients` (`ingredientName`, `unit`, `currentStock`, `minStock`,
 SELECT 'مشروب غازي علبة', 'piece', 240, 48, 480, 600, 1 FROM DUAL
 WHERE NOT EXISTS (SELECT 1 FROM `Ingredients` WHERE `ingredientName` = 'مشروب غازي علبة');
 
--- Kitchen internal store (location 2) — drinks deduct their ingredients from here
+-- Kitchen internal store (location 2) — every sale uses its recipe ingredients from here
+INSERT INTO `IngredientStock` (`ingredientId`, `locationId`, `quantity`)
+SELECT i.`idIngredient`, 2, 16.0 FROM `Ingredients` i WHERE i.`ingredientName` = 'صدر دجاج'
+AND NOT EXISTS (SELECT 1 FROM `IngredientStock` s WHERE s.`ingredientId` = i.`idIngredient` AND s.`locationId` = 2);
+INSERT INTO `IngredientStock` (`ingredientId`, `locationId`, `quantity`)
+SELECT i.`idIngredient`, 2, 10.0 FROM `Ingredients` i WHERE i.`ingredientName` = 'لحم غنم'
+AND NOT EXISTS (SELECT 1 FROM `IngredientStock` s WHERE s.`ingredientId` = i.`idIngredient` AND s.`locationId` = 2);
+INSERT INTO `IngredientStock` (`ingredientId`, `locationId`, `quantity`)
+SELECT i.`idIngredient`, 2, 8.0 FROM `Ingredients` i WHERE i.`ingredientName` = 'لحم مفروم'
+AND NOT EXISTS (SELECT 1 FROM `IngredientStock` s WHERE s.`ingredientId` = i.`idIngredient` AND s.`locationId` = 2);
+INSERT INTO `IngredientStock` (`ingredientId`, `locationId`, `quantity`)
+SELECT i.`idIngredient`, 2, 20.0 FROM `Ingredients` i WHERE i.`ingredientName` = 'رز بسمتي'
+AND NOT EXISTS (SELECT 1 FROM `IngredientStock` s WHERE s.`ingredientId` = i.`idIngredient` AND s.`locationId` = 2);
+INSERT INTO `IngredientStock` (`ingredientId`, `locationId`, `quantity`)
+SELECT i.`idIngredient`, 2, 6.0 FROM `Ingredients` i WHERE i.`ingredientName` = 'حمص حب'
+AND NOT EXISTS (SELECT 1 FROM `IngredientStock` s WHERE s.`ingredientId` = i.`idIngredient` AND s.`locationId` = 2);
+INSERT INTO `IngredientStock` (`ingredientId`, `locationId`, `quantity`)
+SELECT i.`idIngredient`, 2, 4.0 FROM `Ingredients` i WHERE i.`ingredientName` = 'طحينة'
+AND NOT EXISTS (SELECT 1 FROM `IngredientStock` s WHERE s.`ingredientId` = i.`idIngredient` AND s.`locationId` = 2);
+INSERT INTO `IngredientStock` (`ingredientId`, `locationId`, `quantity`)
+SELECT i.`idIngredient`, 2, 8.0 FROM `Ingredients` i WHERE i.`ingredientName` = 'باذنجان'
+AND NOT EXISTS (SELECT 1 FROM `IngredientStock` s WHERE s.`ingredientId` = i.`idIngredient` AND s.`locationId` = 2);
+INSERT INTO `IngredientStock` (`ingredientId`, `locationId`, `quantity`)
+SELECT i.`idIngredient`, 2, 12.0 FROM `Ingredients` i WHERE i.`ingredientName` = 'طماطم'
+AND NOT EXISTS (SELECT 1 FROM `IngredientStock` s WHERE s.`ingredientId` = i.`idIngredient` AND s.`locationId` = 2);
+INSERT INTO `IngredientStock` (`ingredientId`, `locationId`, `quantity`)
+SELECT i.`idIngredient`, 2, 8.0 FROM `Ingredients` i WHERE i.`ingredientName` = 'خيار'
+AND NOT EXISTS (SELECT 1 FROM `IngredientStock` s WHERE s.`ingredientId` = i.`idIngredient` AND s.`locationId` = 2);
+INSERT INTO `IngredientStock` (`ingredientId`, `locationId`, `quantity`)
+SELECT i.`idIngredient`, 2, 12.0 FROM `Ingredients` i WHERE i.`ingredientName` = 'خس'
+AND NOT EXISTS (SELECT 1 FROM `IngredientStock` s WHERE s.`ingredientId` = i.`idIngredient` AND s.`locationId` = 2);
+INSERT INTO `IngredientStock` (`ingredientId`, `locationId`, `quantity`)
+SELECT i.`idIngredient`, 2, 16.0 FROM `Ingredients` i WHERE i.`ingredientName` = 'بقدونس'
+AND NOT EXISTS (SELECT 1 FROM `IngredientStock` s WHERE s.`ingredientId` = i.`idIngredient` AND s.`locationId` = 2);
+INSERT INTO `IngredientStock` (`ingredientId`, `locationId`, `quantity`)
+SELECT i.`idIngredient`, 2, 4.0 FROM `Ingredients` i WHERE i.`ingredientName` = 'زيت زيتون'
+AND NOT EXISTS (SELECT 1 FROM `IngredientStock` s WHERE s.`ingredientId` = i.`idIngredient` AND s.`locationId` = 2);
+INSERT INTO `IngredientStock` (`ingredientId`, `locationId`, `quantity`)
+SELECT i.`idIngredient`, 2, 80.0 FROM `Ingredients` i WHERE i.`ingredientName` = 'خبز عربي'
+AND NOT EXISTS (SELECT 1 FROM `IngredientStock` s WHERE s.`ingredientId` = i.`idIngredient` AND s.`locationId` = 2);
 INSERT INTO `IngredientStock` (`ingredientId`, `locationId`, `quantity`)
 SELECT i.`idIngredient`, 2, 15 FROM `Ingredients` i WHERE i.`ingredientName` = 'برتقال'
 AND NOT EXISTS (SELECT 1 FROM `IngredientStock` s WHERE s.`ingredientId` = i.`idIngredient` AND s.`locationId` = 2);

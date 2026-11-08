@@ -5,6 +5,20 @@ const Expense = require("../models/expense.model");
 const { postShift } = require("../services/postShift.service");
 const db = require("../models/db");
 
+// Other incomes of the shift, plus cash collected from credit customers, minus cash
+// refunds for returns (an exchange where the customer paid extra adds instead).
+function shiftCashExtras(dailyReceiptId, cb) {
+  OtherIncome.getTotalsByShift(dailyReceiptId, (oiErr, oiTotals) => {
+    db.query(
+      `SELECT COALESCE(SUM(amount), 0)
+              - (SELECT COALESCE(SUM(totalRefundAmount), 0) FROM OrderReturns WHERE dailyReceiptId = ? AND refundMethod = 'cash') AS customerCash
+       FROM CustomerReceipts WHERE dailyReceiptId = ? AND paymentMethod = 'cash'`,
+      [dailyReceiptId, dailyReceiptId],
+      (crErr, crRows) => cb(oiErr, oiTotals, crErr ? 0 : parseFloat(crRows[0].customerCash || 0))
+    );
+  });
+}
+
 // ============================================================================
 // DAILY RECEIPT CRUD OPERATIONS
 // ============================================================================
@@ -38,6 +52,37 @@ exports.findById = (req, res) => {
   });
 };
 
+// Fill a shift row with its live totals and the cash expected in the drawer.
+// Shared by the shift screen and the cash box so both always show the same number.
+function withShiftCash(data, callback) {
+  const dailyReceiptId = data.idDailyReceipt || data.id;
+  Order.getSummaryByShift(dailyReceiptId, (orderErr, summary) => {
+    const ok = !orderErr && summary;
+    data.totalSales = ok ? parseFloat(summary.totalSales || 0) : 0;
+    data.cashSales = ok ? parseFloat(summary.cashSales || 0) : 0;
+    data.cardSales = ok ? parseFloat(summary.cardSales || 0) : 0;
+    data.creditSales = ok ? parseFloat(summary.creditSales || 0) : 0;
+    data.orderCount = ok ? summary.orderCount || 0 : 0;
+
+    Expense.getTotalByShift(dailyReceiptId, (expErr, expTotals) => {
+      const totalExpenses = expTotals && !expErr ? parseFloat(expTotals.totalExpenses || 0) : parseFloat(data.totalExpenses || 0);
+      const cashExpenses = expTotals && !expErr ? parseFloat(expTotals.cashExpenses || 0) : totalExpenses;
+      data.totalExpenses = totalExpenses;
+      data.cashExpenses = cashExpenses;
+
+      shiftCashExtras(dailyReceiptId, (oiErr, oiTotals, customerCash) => {
+        const otherIncomesCash = oiTotals && !oiErr ? (oiTotals.cashTotal || 0) : 0;
+        data.totalOtherIncomes = oiTotals && !oiErr ? (oiTotals.total || 0) : 0;
+        data.otherIncomesCash = otherIncomesCash;
+        data.customerCash = customerCash;
+        data.expectedCash = parseFloat(data.openingCash || 0) + data.cashSales - cashExpenses + otherIncomesCash + customerCash;
+        callback(data);
+      });
+    });
+  });
+}
+exports.withShiftCash = withShiftCash;
+
 exports.getCurrent = (req, res) => {
   const today = new Date().toISOString().split('T')[0];
 
@@ -52,41 +97,7 @@ exports.getCurrent = (req, res) => {
         message: err.message || "Error retrieving current receipt."
       });
     }
-
-    const dailyReceiptId = data.idDailyReceipt || data.id;
-
-    // Shift-level sales (cash vs credit)
-    Order.getSummaryByShift(dailyReceiptId, (orderErr, summary) => {
-      if (!orderErr && summary) {
-        data.totalSales = parseFloat(summary.totalSales || 0);
-        data.cashSales = parseFloat(summary.cashSales || 0);
-        data.creditSales = parseFloat(summary.creditSales || 0);
-        data.orderCount = summary.orderCount || 0;
-      } else {
-        data.totalSales = 0;
-        data.cashSales = 0;
-        data.creditSales = 0;
-        data.orderCount = 0;
-      }
-
-      // Shift-level expenses
-      Expense.getTotalByShift(dailyReceiptId, (expErr, expTotals) => {
-        const totalExpenses = expTotals && !expErr ? parseFloat(expTotals.totalExpenses || 0) : parseFloat(data.totalExpenses || 0);
-        data.totalExpenses = totalExpenses;
-
-        // Other incomes for this shift (cash portion increases expected cash)
-        OtherIncome.getTotalsByShift(dailyReceiptId, (oiErr, oiTotals) => {
-          const otherIncomesCash = oiTotals && !oiErr ? (oiTotals.cashTotal || 0) : 0;
-          const totalOtherIncomes = oiTotals && !oiErr ? (oiTotals.total || 0) : 0;
-          data.totalOtherIncomes = totalOtherIncomes;
-          data.otherIncomesCash = otherIncomesCash;
-          const opening = parseFloat(data.openingCash || 0);
-          const cashSales = parseFloat(data.cashSales || 0);
-          data.expectedCash = opening + cashSales - totalExpenses + otherIncomesCash;
-          res.json(data);
-        });
-      });
-    });
+    withShiftCash(data, (full) => res.json(full));
   });
 };
 
@@ -209,18 +220,20 @@ exports.close = (req, res) => {
     // Shift-level sales (cash vs credit)
     Order.getSummaryByShift(dailyReceiptId, (orderErr, summary) => {
       const cashSales = summary && !orderErr ? parseFloat(summary.cashSales || 0) : 0;
+      const cardSales = summary && !orderErr ? parseFloat(summary.cardSales || 0) : 0;
       const creditSales = summary && !orderErr ? parseFloat(summary.creditSales || 0) : 0;
       const totalSales = summary && !orderErr ? parseFloat(summary.totalSales || 0) : 0;
       const orderCount = summary && !orderErr ? (summary.orderCount || 0) : 0;
 
       Expense.getTotalByShift(dailyReceiptId, (expErr, expTotals) => {
         const totalExpenses = expTotals && !expErr ? parseFloat(expTotals.totalExpenses || 0) : parseFloat(receipt.totalExpenses || 0);
+        const cashExpenses = expTotals && !expErr ? parseFloat(expTotals.cashExpenses || 0) : totalExpenses;
 
-        OtherIncome.getTotalsByShift(dailyReceiptId, (oiErr, oiTotals) => {
+        shiftCashExtras(dailyReceiptId, (oiErr, oiTotals, customerCash) => {
           const otherIncomesCash = oiTotals && !oiErr ? (oiTotals.cashTotal || 0) : 0;
           const totalOtherIncomes = oiTotals && !oiErr ? (oiTotals.total || 0) : 0;
 
-          const expectedCash = openingCash + cashSales - totalExpenses + otherIncomesCash;
+          const expectedCash = openingCash + cashSales - cashExpenses + otherIncomesCash + customerCash;
           const closingCash = parseFloat(req.body.closingCash);
           const discrepancy = closingCash - expectedCash;
 
@@ -239,6 +252,9 @@ exports.close = (req, res) => {
               console.log(`[close] postShift finished in ${Date.now() - postShiftStart}ms (total ${Date.now() - closeStart}ms)`);
               if (postErr) {
                 console.error("[close] Post Shift error:", postErr?.message || postErr);
+                if (postErr.message === "Shift already posted" || postErr.message === "Shift already closed") {
+                  return sendOnce(409, { message: "هذا الشفت أُغلق ورُحّل بالفعل" });
+                }
                 return sendOnce(500, {
                   message: postErr.message || "ترحيل الشفت فشل. تأكد من وجود PostingSettings والحسابات."
                 });
@@ -278,12 +294,14 @@ exports.close = (req, res) => {
                       summary: {
                         openingCash,
                         cashSales,
+                        cardSales,
                         creditSales,
                         totalSales,
                         orderCount,
                         totalExpenses,
                         totalOtherIncomes,
                         otherIncomesCash,
+                        customerCash,
                         expectedCash,
                         closingCash,
                         discrepancy,

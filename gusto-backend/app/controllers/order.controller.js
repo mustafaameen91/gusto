@@ -33,21 +33,18 @@ const deductInventoryForOrder = (orderId, orderItems, callback) => {
         return;
       }
 
-      // Kitchen item: decrease kitchen mini storage only (no ingredient deduction)
-      if (menuItem.isKitchen) {
-        KitchenItemStock.decrease(menuItem.idMenuItem, item.quantity, (errK) => {
-          if (errK) console.error(`Kitchen stock decrease for ${menuItem.itemName}:`, errK.message);
-          processedItems++;
-          if (processedItems === orderItems.length) finalizeTransactions();
-        });
-        return;
-      }
+      const finishItem = () => {
+        processedItems++;
+        if (processedItems === orderItems.length) finalizeTransactions();
+      };
 
-      // Barista (recipe) items: deduct ingredients from Barista Internal
+      // Recipe items (food and drinks): use their ingredients from the kitchen internal store
+      // and record the cost, so shift close can post cost of goods sold.
       if (menuItem.itemType === 'recipe' && menuItem.recipes.length > 0) {
-        // Filter recipes by sizeId if size was selected
-        const relevantRecipes = item.sizeId 
-          ? menuItem.recipes.filter(r => r.sizeId === item.sizeId)
+        // The Cashier sends itemSizeId; use the size's own recipe when there is one
+        const sizeId = Number(item.itemSizeId ?? item.sizeId) || null;
+        const relevantRecipes = sizeId
+          ? menuItem.recipes.filter(r => Number(r.sizeId) === sizeId)
           : menuItem.recipes.filter(r => !r.sizeId);
         const recipesToUse = relevantRecipes.length > 0 
           ? relevantRecipes 
@@ -55,31 +52,32 @@ const deductInventoryForOrder = (orderId, orderItems, callback) => {
         
         recipesToUse.forEach((recipe) => {
           const quantityToDeduct = recipe.quantityNeeded * item.quantity;
-          const sizeNote = item.sizeId ? ` (${item.sizeName || 'Size'})` : '';
+          const unitCost = Number(recipe.costPerUnit) || 0;
+          const sizeNote = sizeId ? ` (${item.sizeName || 'Size'})` : '';
           transactions.push({
             ingredientId: recipe.ingredientId,
             transactionType: 'usage',
             quantity: -quantityToDeduct,
+            costPerUnit: unitCost,
+            totalCost: Math.round(quantityToDeduct * unitCost * 100) / 100,
             orderId: orderId,
             recordedBy: null,
             notes: `Auto-deduction for ${menuItem.itemName}${sizeNote} (Order #${orderId})`
           });
         });
-      } else if (menuItem.itemType === 'harmony' && menuItem.isInventoryItem) {
-        transactions.push({
-          ingredientId: item.menuItemId,
-          transactionType: 'usage',
-          quantity: -item.quantity,
-          orderId: orderId,
-          recordedBy: null,
-          notes: `Auto-deduction for harmony item ${menuItem.itemName} (Order #${orderId})`
-        });
       }
+      // Harmony items have no ingredient link; their stock is managed by hand.
+      // (The old code deducted ingredient #menuItemId, i.e. an unrelated ingredient.)
 
-      processedItems++;
-      if (processedItems === orderItems.length) {
-        finalizeTransactions();
+      // Food: also count down the ready portions
+      if (menuItem.isKitchen) {
+        KitchenItemStock.decrease(menuItem.idMenuItem, item.quantity, (errK) => {
+          if (errK) console.error(`Kitchen stock decrease for ${menuItem.itemName}:`, errK.message);
+          finishItem();
+        });
+        return;
       }
+      finishItem();
     });
   });
 
@@ -178,12 +176,113 @@ const validateKitchenStock = (orderItems, callback) => {
 // ORDER CRUD OPERATIONS
 // ============================================================================
 
-exports.create = (req, res) => {
+const ORDER_TYPES = ["cashier", "card", "qr"];
+const SALE_TYPES = ["cash", "credit"];
+const DISCOUNT_ROLES = ["admin", "supervisor"];
+const round2 = (n) => Math.round(n * 100) / 100;
+
+/**
+ * Validate an order and price it from the menu.
+ * Item price = MenuItems.basePrice + ItemSizes.priceAdjustment (when a size is chosen).
+ * Returns { items, subtotal, discount, discountType, total } or { error, status, code }.
+ */
+const priceOrder = (body, role) =>
+  new Promise((resolve) => {
+    const db = require("../models/db");
+    const orderType = body.orderType || "cashier";
+    const saleType = body.saleType || "cash";
+    if (!ORDER_TYPES.includes(orderType)) return resolve({ error: "طريقة دفع غير صحيحة" });
+    if (!SALE_TYPES.includes(saleType)) return resolve({ error: "نوع البيع غير صحيح" });
+
+    const items = body.orderItems || [];
+    for (const it of items) {
+      const q = Number(it.quantity);
+      if (!Number.isInteger(q) || q < 1) return resolve({ error: "الكمية يجب أن تكون عدداً صحيحاً أكبر من صفر" });
+    }
+    const menuIds = [...new Set(items.map((it) => Number(it.menuItemId)))];
+    const sizeIds = [...new Set(items.map((it) => Number(it.itemSizeId ?? it.sizeId)).filter(Boolean))];
+
+    db.query("SELECT idMenuItem, itemName, basePrice, isActive, isAvailable FROM MenuItems WHERE idMenuItem IN (?)", [menuIds], (err, menuRows) => {
+      if (err) return resolve({ error: err.message, status: 500 });
+      const menu = new Map(menuRows.map((m) => [m.idMenuItem, m]));
+      const loadSizes = (cb) => (sizeIds.length
+        ? db.query("SELECT idItemSize, menuItemId, sizeName, priceAdjustment, isActive FROM ItemSizes WHERE idItemSize IN (?)", [sizeIds], cb)
+        : cb(null, []));
+      loadSizes((errS, sizeRows) => {
+        if (errS) return resolve({ error: errS.message, status: 500 });
+        const sizes = new Map(sizeRows.map((z) => [z.idItemSize, z]));
+        let subtotal = 0;
+        const pricedItems = [];
+        for (const it of items) {
+          const m = menu.get(Number(it.menuItemId));
+          if (!m || !m.isActive) return resolve({ error: `الصنف ${it.menuItemId} غير موجود` });
+          if (!m.isAvailable) return resolve({ error: `الصنف "${m.itemName}" غير متاح حالياً` });
+          const sizeId = Number(it.itemSizeId ?? it.sizeId) || null;
+          let price = Number(m.basePrice);
+          let sizeName = null;
+          if (sizeId) {
+            const z = sizes.get(sizeId);
+            if (!z || z.menuItemId !== m.idMenuItem || !z.isActive) return resolve({ error: `الحجم المختار غير صالح للصنف "${m.itemName}"` });
+            price += Number(z.priceAdjustment);
+            sizeName = z.sizeName;
+          }
+          const quantity = Number(it.quantity);
+          subtotal += price * quantity;
+          pricedItems.push({ ...it, menuItemId: m.idMenuItem, quantity, price: round2(price), itemSizeId: sizeId, sizeName });
+        }
+        subtotal = round2(subtotal);
+
+        const discountType = body.discountType === "percentage" ? "percentage" : "amount";
+        const discount = Number(body.discount) || 0;
+        if (discount < 0) return resolve({ error: "الخصم لا يمكن أن يكون سالباً" });
+        if (discount > 0 && !DISCOUNT_ROLES.includes(role)) {
+          return resolve({ error: "الخصم مسموح للمشرف أو المدير فقط", status: 403, code: "DISCOUNT_NOT_ALLOWED" });
+        }
+        if (discountType === "percentage" && discount > 100) return resolve({ error: "نسبة الخصم لا يمكن أن تتجاوز 100%" });
+        const discountAmount = round2(discountType === "percentage" ? (subtotal * discount) / 100 : discount);
+        if (discountAmount > subtotal) return resolve({ error: "الخصم أكبر من قيمة الطلب" });
+
+        resolve({ items: pricedItems, subtotal, discount, discountType, total: round2(subtotal - discountAmount) });
+      });
+    });
+  });
+
+// Credit limit 0 means "no limit". Returns an Arabic message when the sale would exceed it.
+const creditLimitProblem = (customerId, orderTotal) =>
+  new Promise((resolve) => {
+    const Customer = require("../models/customer.model");
+    Customer.findById(customerId, (err, customer) => {
+      if (err || !customer) return resolve("العميل غير موجود");
+      if (!customer.isActive) return resolve("حساب العميل غير فعّال");
+      const limit = Number(customer.creditLimit || 0);
+      if (limit <= 0) return resolve(null);
+      Customer.outstandingBalance(customerId, (errBal, balance) => {
+        if (errBal) return resolve("تعذر التحقق من رصيد العميل");
+        if (balance + orderTotal > limit + 0.005) {
+          return resolve(`تجاوز حد الائتمان للعميل: الرصيد الحالي ${balance.toLocaleString()} + الطلب ${orderTotal.toLocaleString()} > الحد ${limit.toLocaleString()} د.ع`);
+        }
+        resolve(null);
+      });
+    });
+  });
+
+exports.create = async (req, res) => {
   if (!req.body.orderItems || req.body.orderItems.length === 0) {
     return res.status(400).json({
       message: "Order must have at least one item!"
     });
   }
+
+  // Prices, subtotal, discount and total are computed here; the screen's numbers are not trusted
+  const priced = await priceOrder(req.body, req.userRole);
+  if (priced.error) {
+    return res.status(priced.status || 400).json({ message: priced.error, code: priced.code || "INVALID_ORDER" });
+  }
+  req.body.orderItems = priced.items;
+  req.body.subtotal = priced.subtotal;
+  req.body.totalAmount = priced.total;
+  req.body.discount = priced.discount;
+  req.body.discountType = priced.discountType;
 
   const today = new Date().toISOString().split("T")[0];
 
@@ -200,7 +299,7 @@ exports.create = (req, res) => {
     }
 
     // Validate kitchen stock before creating order (prevent over-selling)
-    validateKitchenStock(req.body.orderItems, (validateErr) => {
+    validateKitchenStock(req.body.orderItems, async (validateErr) => {
       if (validateErr) {
         return res.status(400).json({
           message: validateErr.message || "Insufficient kitchen stock.",
@@ -227,6 +326,10 @@ exports.create = (req, res) => {
           message: "عند البيع آجل يجب اختيار العميل (المدين).",
           code: "CUSTOMER_REQUIRED_FOR_CREDIT"
         });
+      }
+      const limitMessage = await creditLimitProblem(req.body.customerId, Number(req.body.totalAmount) || 0);
+      if (limitMessage) {
+        return res.status(400).json({ message: limitMessage, code: "CREDIT_LIMIT_EXCEEDED" });
       }
     }
 
@@ -348,6 +451,20 @@ exports.updateStatus = (req, res) => {
   if (!req.body.status) {
     return res.status(400).json({
       message: "Status is required!"
+    });
+  }
+
+  // Cancelling the whole order changes money and stock: guarded transaction
+  if (req.body.status === "cancelled") {
+    const { cancelOrderItems } = require("../services/cancelOrderItems.service");
+    return cancelOrderItems(req.params.id, null, { id: req.userId, role: req.userRole }, (errC, result) => {
+      if (errC) return res.status(errC.status || 500).json({ message: errC.message });
+      const io = req.app.get("io");
+      if (io) {
+        io.to("kitchen").emit("order_status_changed", { orderId: req.params.id, status: "cancelled" });
+        io.to("cashier").emit("order_status_changed", { orderId: req.params.id, status: "cancelled" });
+      }
+      res.json({ message: "تم إلغاء الطلب", ...result });
     });
   }
 

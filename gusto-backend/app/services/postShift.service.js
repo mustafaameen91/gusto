@@ -55,6 +55,21 @@ function postShift(dailyReceiptId, postedBy, result) {
           }
           console.log(`[postShift] 1_lock ${Date.now() - t0}ms`);
 
+          // 1b) Refuse to post the same shift twice (e.g. double-click on close).
+          // The row lock above makes a second request wait until the first commits.
+          conn.query(
+            "SELECT idJournalEntry FROM JournalEntries WHERE sourceType = 'SHIFT_POST' AND dailyReceiptId = ? AND status = 'POSTED' LIMIT 1",
+            [dailyReceiptId],
+            (errDup, dupRows) => {
+              if (errDup) {
+                rollback(errDup);
+                return;
+              }
+              if (dupRows && dupRows.length > 0) {
+                rollback(new Error("Shift already posted"));
+                return;
+              }
+
           // 2) Load posting settings
           conn.query(
             "SELECT * FROM PostingSettings WHERE name = 'default' LIMIT 1",
@@ -74,7 +89,8 @@ function postShift(dailyReceiptId, postedBy, result) {
               // 3) Aggregate sales for this shift (DB enum: cash | credit only; Iraqi GL: cash vs credit/AR)
               conn.query(
                 `SELECT
-                  SUM(CASE WHEN o.saleType = 'cash' THEN (o.totalAmount) ELSE 0 END) AS cashSales,
+                  SUM(CASE WHEN o.saleType = 'cash' AND o.orderType <> 'card' THEN (o.totalAmount) ELSE 0 END) AS cashSales,
+                  SUM(CASE WHEN o.saleType = 'cash' AND o.orderType = 'card' THEN (o.totalAmount) ELSE 0 END) AS cardSales,
                   SUM(CASE WHEN o.saleType = 'credit' THEN (o.totalAmount) ELSE 0 END) AS creditSales,
                   SUM(o.totalAmount) AS totalSales
                 FROM Orders o
@@ -87,21 +103,58 @@ function postShift(dailyReceiptId, postedBy, result) {
                   }
                   const sales = salesRows[0] || {};
                   const cashSales = Number(sales.cashSales || 0);
+                  const cardSales = Number(sales.cardSales || 0);
                   const creditSales = Number(sales.creditSales || 0);
                   console.log(`[postShift] 3_sales ${Date.now() - t0}ms`);
 
                   // 3b) Sales by category (food vs beverage) for revenue split when salesDessertsAccountId is set.
                   // Restaurant: drink categories → salesBeveragesAccountId; everything else (food) → salesDessertsAccountId (labelled food sales).
+                  // Each order's net amount (after its own discount) is split by that order's
+                  // drinks vs food item value, so per-order discounts land in the right account.
                   conn.query(
                     `SELECT
-                      COALESCE(SUM(CASE WHEN NOT (c.categoryName LIKE '%مشروب%' OR c.categoryName LIKE '%عصير%' OR c.categoryName LIKE '%drink%' OR c.categoryName LIKE '%beverage%' OR c.categoryName LIKE '%juice%') THEN (oi.quantity * oi.price) ELSE 0 END), 0) AS dessertSales,
-                      COALESCE(SUM(CASE WHEN c.categoryName LIKE '%مشروب%' OR c.categoryName LIKE '%عصير%' OR c.categoryName LIKE '%drink%' OR c.categoryName LIKE '%beverage%' OR c.categoryName LIKE '%juice%' THEN (oi.quantity * oi.price) ELSE 0 END), 0) AS beverageSales
-                     FROM OrderItems oi
-                     INNER JOIN MenuItems m ON oi.menuItemId = m.idMenuItem
-                     INNER JOIN Categories c ON m.categoryId = c.idCategory
-                     INNER JOIN Orders o ON oi.orderId = o.idOrder
-                     WHERE o.dailyReceiptId = ? AND o.status != 'cancelled'`,
-                    [dailyReceiptId],
+                       COALESCE(SUM(o.totalAmount * x.drinkValue / x.itemsValue), 0) AS beverageSales,
+                       COALESCE(SUM(o.totalAmount * (x.itemsValue - x.drinkValue) / x.itemsValue), 0) AS dessertSales,
+                       -- Returns processed in this shift (refunds and replacements, by drinks/food)
+                       (SELECT COALESCE(SUM(CASE WHEN (c.categoryName LIKE '%مشروب%' OR c.categoryName LIKE '%عصير%' OR c.categoryName LIKE '%drink%' OR c.categoryName LIKE '%beverage%' OR c.categoryName LIKE '%juice%') THEN ri.refundAmount ELSE 0 END), 0)
+                          FROM OrderReturnItems ri
+                          JOIN OrderReturns r ON r.idOrderReturn = ri.orderReturnId
+                          JOIN MenuItems m ON m.idMenuItem = ri.menuItemId JOIN Categories c ON c.idCategory = m.categoryId
+                          LEFT JOIN MenuItems m2 ON m2.idMenuItem = ri.replacementMenuItemId LEFT JOIN Categories c2 ON c2.idCategory = m2.categoryId
+                          WHERE r.dailyReceiptId = ?) AS drinksReturned,
+                       (SELECT COALESCE(SUM(CASE WHEN NOT (c.categoryName LIKE '%مشروب%' OR c.categoryName LIKE '%عصير%' OR c.categoryName LIKE '%drink%' OR c.categoryName LIKE '%beverage%' OR c.categoryName LIKE '%juice%') THEN ri.refundAmount ELSE 0 END), 0)
+                          FROM OrderReturnItems ri
+                          JOIN OrderReturns r ON r.idOrderReturn = ri.orderReturnId
+                          JOIN MenuItems m ON m.idMenuItem = ri.menuItemId JOIN Categories c ON c.idCategory = m.categoryId
+                          LEFT JOIN MenuItems m2 ON m2.idMenuItem = ri.replacementMenuItemId LEFT JOIN Categories c2 ON c2.idCategory = m2.categoryId
+                          WHERE r.dailyReceiptId = ?) AS foodReturned,
+                       (SELECT COALESCE(SUM(CASE WHEN ri.replacementMenuItemId IS NOT NULL AND (c2.categoryName LIKE '%مشروب%' OR c2.categoryName LIKE '%عصير%' OR c2.categoryName LIKE '%drink%' OR c2.categoryName LIKE '%beverage%' OR c2.categoryName LIKE '%juice%') THEN ri.replacementPrice * ri.replacementQuantity ELSE 0 END), 0)
+                          FROM OrderReturnItems ri
+                          JOIN OrderReturns r ON r.idOrderReturn = ri.orderReturnId
+                          JOIN MenuItems m ON m.idMenuItem = ri.menuItemId JOIN Categories c ON c.idCategory = m.categoryId
+                          LEFT JOIN MenuItems m2 ON m2.idMenuItem = ri.replacementMenuItemId LEFT JOIN Categories c2 ON c2.idCategory = m2.categoryId
+                          WHERE r.dailyReceiptId = ?) AS drinksReplaced,
+                       (SELECT COALESCE(SUM(CASE WHEN ri.replacementMenuItemId IS NOT NULL AND NOT (c2.categoryName LIKE '%مشروب%' OR c2.categoryName LIKE '%عصير%' OR c2.categoryName LIKE '%drink%' OR c2.categoryName LIKE '%beverage%' OR c2.categoryName LIKE '%juice%') THEN ri.replacementPrice * ri.replacementQuantity ELSE 0 END), 0)
+                          FROM OrderReturnItems ri
+                          JOIN OrderReturns r ON r.idOrderReturn = ri.orderReturnId
+                          JOIN MenuItems m ON m.idMenuItem = ri.menuItemId JOIN Categories c ON c.idCategory = m.categoryId
+                          LEFT JOIN MenuItems m2 ON m2.idMenuItem = ri.replacementMenuItemId LEFT JOIN Categories c2 ON c2.idCategory = m2.categoryId
+                          WHERE r.dailyReceiptId = ?) AS foodReplaced,
+                       (SELECT COALESCE(SUM(totalRefundAmount), 0) FROM OrderReturns WHERE dailyReceiptId = ? AND refundMethod = 'cash') AS returnsCash,
+                       (SELECT COALESCE(SUM(totalRefundAmount), 0) FROM OrderReturns WHERE dailyReceiptId = ? AND refundMethod = 'credit') AS returnsCredit
+                     FROM Orders o
+                     INNER JOIN (
+                       SELECT oi.orderId,
+                              SUM(CASE WHEN (c.categoryName LIKE '%مشروب%' OR c.categoryName LIKE '%عصير%' OR c.categoryName LIKE '%drink%' OR c.categoryName LIKE '%beverage%' OR c.categoryName LIKE '%juice%') THEN oi.quantity * oi.price ELSE 0 END) AS drinkValue,
+                              SUM(oi.quantity * oi.price) AS itemsValue
+                       FROM OrderItems oi
+                       INNER JOIN MenuItems m ON oi.menuItemId = m.idMenuItem
+                       INNER JOIN Categories c ON m.categoryId = c.idCategory
+                       WHERE oi.status NOT IN ('cancelled', 'returned')
+                       GROUP BY oi.orderId
+                     ) x ON x.orderId = o.idOrder AND x.itemsValue > 0
+                     WHERE o.dailyReceiptId = ? AND o.status != 'cancelled' AND o.saleType IN ('cash', 'credit')`,
+                    [dailyReceiptId, dailyReceiptId, dailyReceiptId, dailyReceiptId, dailyReceiptId, dailyReceiptId, dailyReceiptId],
                     (errCat, catRows) => {
                       if (errCat) {
                         rollback(errCat);
@@ -110,34 +163,47 @@ function postShift(dailyReceiptId, postedBy, result) {
                       const cat = catRows[0] || {};
                       const dessertSales = Number(cat.dessertSales || 0);
                       const beverageSales = Number(cat.beverageSales || 0);
+                      const ret = {
+                        drinksReturned: Number(cat.drinksReturned || 0),
+                        foodReturned: Number(cat.foodReturned || 0),
+                        drinksReplaced: Number(cat.drinksReplaced || 0),
+                        foodReplaced: Number(cat.foodReplaced || 0),
+                        cash: Number(cat.returnsCash || 0),
+                        credit: Number(cat.returnsCredit || 0),
+                      };
                       console.log(`[postShift] 3b_category ${Date.now() - t0}ms`);
 
                   // 4) Aggregate expenses for this shift
                   conn.query(
-                    `SELECT COALESCE(SUM(amount), 0) AS totalExpenses
+                    `SELECT COALESCE(SUM(amount), 0) AS totalExpenses,
+                            COALESCE(SUM(CASE WHEN paidFromAccountId IS NULL OR paidFromAccountId = ? THEN amount ELSE 0 END), 0) AS cashExpenses
                      FROM Expenses WHERE dailyReceiptId = ?`,
-                    [dailyReceiptId],
+                    [ps.cashAccountId, dailyReceiptId],
                     (errExp, expRows) => {
                       if (errExp) {
                         rollback(errExp);
                         return;
                       }
                       const totalExp = Number(expRows[0]?.totalExpenses || 0);
-                      const totalSales = cashSales + creditSales;
+                      const cashExp = Number(expRows[0]?.cashExpenses || 0);
+                      const totalSales = cashSales + cardSales + creditSales;
                       const openingCash = Number(shift.openingCash || 0);
                       console.log(`[postShift] 4_expenses ${Date.now() - t0}ms`);
                       // 4a) Other incomes (cash) add to expected cash in drawer
                       conn.query(
-                        `SELECT COALESCE(SUM(CASE WHEN paymentMethod = 'cash' THEN amount ELSE 0 END), 0) AS cashTotal
+                        `SELECT COALESCE(SUM(CASE WHEN paymentMethod = 'cash' THEN amount ELSE 0 END), 0) AS cashTotal,
+                                (SELECT COALESCE(SUM(amount), 0) FROM CustomerReceipts WHERE dailyReceiptId = ? AND paymentMethod = 'cash')
+                                - (SELECT COALESCE(SUM(totalRefundAmount), 0) FROM OrderReturns WHERE dailyReceiptId = ? AND refundMethod = 'cash') AS customerCash
                          FROM OtherIncomes WHERE dailyReceiptId = ?`,
-                        [dailyReceiptId],
+                        [dailyReceiptId, dailyReceiptId, dailyReceiptId],
                         (errOi, oiRows) => {
                           const oiCash = Number(oiRows?.[0]?.cashTotal || 0);
                           if (errOi) {
                             rollback(errOi);
                             return;
                           }
-                          const expectedCash = openingCash + totalSales - totalExp + oiCash;
+                          const customerCash = Number(oiRows?.[0]?.customerCash || 0);
+                          const expectedCash = openingCash + cashSales - cashExp + oiCash + customerCash;
                           console.log(`[postShift] 4a_other_incomes ${Date.now() - t0}ms`);
 
                       // 4b) Update DailyReceipts totals in same transaction (avoids lock wait from separate updateTotals)
@@ -192,7 +258,7 @@ function postShift(dailyReceiptId, postedBy, result) {
                                 `SELECT e.idExpense, e.amount, e.expenseCategoryId, ec.defaultAccountId, e.paidFromAccountId
                                  FROM Expenses e
                                  LEFT JOIN ExpenseCategories ec ON ec.idExpenseCategory = e.expenseCategoryId
-                                 WHERE e.dailyReceiptId = ?`,
+                                 WHERE e.dailyReceiptId = ? AND e.journalEntryId IS NULL`,
                                 [dailyReceiptId],
                                 (errExpList, expList) => {
                                   if (errExpList) {
@@ -248,10 +314,36 @@ function postShift(dailyReceiptId, postedBy, result) {
                                               const totalWastage = Number(wasteRows[0]?.totalWastage || 0);
                                               console.log(`[postShift] 10_wastage ${Date.now() - t0}ms`);
 
-                                      let pending = 0;
-                                      const useDessertSplit = ps.salesDessertsAccountId && totalSales > 0 && dessertSales > 0;
-                                      if (cashSales > 0) pending += useDessertSplit ? 3 : 2;
-                                      if (creditSales > 0) pending += useDessertSplit ? 3 : 2;
+                                      // Revenue: debit each payment type to its own account (card → bank),
+                                      // credit total revenue once, split drinks / food by the share of item value.
+                                      const round2 = (n) => Math.round(n * 100) / 100;
+                                      const revenueLines = [];
+                                      if (cashSales > 0) revenueLines.push([ps.cashAccountId, cashSales, 0, "Cash sales"]);
+                                      if (cardSales > 0) revenueLines.push([ps.bankAccountId || ps.cashAccountId, cardSales, 0, "Card sales"]);
+                                      if (creditSales > 0) revenueLines.push([ps.arAccountId, creditSales, 0, "Credit sales (AR)"]);
+                                      if (totalSales > 0) {
+                                        if (ps.salesDessertsAccountId && dessertSales > 0) {
+                                          // beverageSales is already net of each order's discount
+                                          const drinksRevenue = round2(Math.min(beverageSales, totalSales));
+                                          const foodRevenue = round2(totalSales - drinksRevenue);
+                                          if (drinksRevenue > 0) revenueLines.push([ps.salesBeveragesAccountId, 0, drinksRevenue, "Revenue drinks"]);
+                                          if (foodRevenue > 0) revenueLines.push([ps.salesDessertsAccountId, 0, foodRevenue, "Revenue food"]);
+                                        } else {
+                                          revenueLines.push([ps.salesBeveragesAccountId, 0, totalSales, "Revenue"]);
+                                        }
+                                      }
+                                      // Returns: Dr revenue for refunds, Cr revenue for replacements,
+                                      // settled in cash (drawer) or on the customer's account (receivables)
+                                      const foodAccount = ps.salesDessertsAccountId || ps.salesBeveragesAccountId;
+                                      if (ret.drinksReturned > 0) revenueLines.push([ps.salesBeveragesAccountId, round2(ret.drinksReturned), 0, "Sales returns drinks"]);
+                                      if (ret.foodReturned > 0) revenueLines.push([foodAccount, round2(ret.foodReturned), 0, "Sales returns food"]);
+                                      if (ret.drinksReplaced > 0) revenueLines.push([ps.salesBeveragesAccountId, 0, round2(ret.drinksReplaced), "Exchange replacement drinks"]);
+                                      if (ret.foodReplaced > 0) revenueLines.push([foodAccount, 0, round2(ret.foodReplaced), "Exchange replacement food"]);
+                                      if (ret.cash > 0) revenueLines.push([ps.cashAccountId, 0, round2(ret.cash), "Refunds paid in cash"]);
+                                      if (ret.cash < 0) revenueLines.push([ps.cashAccountId, round2(-ret.cash), 0, "Exchange difference received in cash"]);
+                                      if (ret.credit > 0) revenueLines.push([ps.arAccountId, 0, round2(ret.credit), "Refunds to customer accounts"]);
+                                      if (ret.credit < 0) revenueLines.push([ps.arAccountId, round2(-ret.credit), 0, "Exchange difference on customer accounts"]);
+                                      let pending = revenueLines.length;
                                       if (totalCogs > 0) pending += 2;
                                       pending += list.length * 2;
                                       pending += otherIncomes.length * 2;
@@ -298,7 +390,12 @@ function postShift(dailyReceiptId, postedBy, result) {
                                     );
                                   };
 
+                                  // lineCb reaches pending === 0 synchronously, and the check after all
+                                  // addLine calls fires too; only the first call may write and commit.
+                                  let commitStarted = false;
                                   const runBalanceCheckAndCommit = () => {
+                                    if (commitStarted) return;
+                                    commitStarted = true;
                                     if (journalLines.length === 0) {
                                       // Zero-activity shift: no lines to post, but still mark entry POSTED and commit
                                       console.log(`[postShift] 11_bulk_lines (0 rows, zero-activity shift) ${Date.now() - t0}ms`);
@@ -327,32 +424,7 @@ function postShift(dailyReceiptId, postedBy, result) {
                                     if (pending === 0) runBalanceCheckAndCommit();
                                   };
 
-                                  if (cashSales > 0) {
-                                    addLine(ps.cashAccountId, cashSales, 0, "Cash sales", lineCb);
-                                    if (useDessertSplit) {
-                                      const cashBeverage = totalSales > 0 ? cashSales * (beverageSales / totalSales) : 0;
-                                      const cashDessert = cashSales - cashBeverage;
-                                      if (cashBeverage > 0) addLine(ps.salesBeveragesAccountId, 0, cashBeverage, "Revenue cash beverages", lineCb);
-                                      else lineCb(null);
-                                      if (cashDessert > 0) addLine(ps.salesDessertsAccountId, 0, cashDessert, "Revenue cash food", lineCb);
-                                      else lineCb(null);
-                                    } else {
-                                      addLine(ps.salesBeveragesAccountId, 0, cashSales, "Revenue cash", lineCb);
-                                    }
-                                  }
-                                  if (creditSales > 0) {
-                                    addLine(ps.arAccountId, creditSales, 0, "Credit sales (AR)", lineCb);
-                                    if (useDessertSplit) {
-                                      const creditBeverage = totalSales > 0 ? creditSales * (beverageSales / totalSales) : 0;
-                                      const creditDessert = creditSales - creditBeverage;
-                                      if (creditBeverage > 0) addLine(ps.salesBeveragesAccountId, 0, creditBeverage, "Revenue credit beverages", lineCb);
-                                      else lineCb(null);
-                                      if (creditDessert > 0) addLine(ps.salesDessertsAccountId, 0, creditDessert, "Revenue credit food", lineCb);
-                                      else lineCb(null);
-                                    } else {
-                                      addLine(ps.salesBeveragesAccountId, 0, creditSales, "Revenue credit", lineCb);
-                                    }
-                                  }
+                                  revenueLines.forEach(([accountId, debit, credit, memo]) => addLine(accountId, debit, credit, memo, lineCb));
                                   if (totalCogs > 0) {
                                     addLine(ps.cogsAccountId, totalCogs, 0, "COGS", lineCb);
                                     addLine(ps.inventoryAccountId, 0, totalCogs, "Inventory", lineCb);
@@ -412,6 +484,8 @@ function postShift(dailyReceiptId, postedBy, result) {
                   );
                 }
               );
+            }
+          );
             }
           );
                 }

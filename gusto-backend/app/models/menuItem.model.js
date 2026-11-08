@@ -89,7 +89,8 @@ MenuItem.getWithRecipes = (id, result) => {
       r.quantityNeeded,
       i.idIngredient,
       i.ingredientName,
-      i.unit
+      i.unit,
+      i.costPerUnit
     FROM MenuItems m
     LEFT JOIN Categories c ON m.categoryId = c.idCategory
     LEFT JOIN Recipes r ON m.idMenuItem = r.menuItemId
@@ -129,7 +130,8 @@ MenuItem.getWithRecipes = (id, result) => {
             ingredientId: row.idIngredient,
             ingredientName: row.ingredientName,
             quantityNeeded: row.quantityNeeded,
-            unit: row.unit
+            unit: row.unit,
+            costPerUnit: row.costPerUnit
           });
         }
       });

@@ -34,10 +34,12 @@ Supplier.getAll = (result) => {
   );
 };
 
-// Get all suppliers with current debt (what we owe them)
-// Debt = initialDebt + unpaid purchases + service debt + supplier credits - supplier payments - transferOut + transferIn
-Supplier.getAllWithBalance = (result) => {
-  const query = `
+// The one definition of what we owe each supplier, used by the list, profile and summary:
+// Debt = initialDebt + received value of credit purchases + service invoices
+//        - supplier payments - expenses paid to the supplier
+//        - supplier credits (returns/refunds/advances: they reduce what we owe)
+//        - transfers out + transfers in
+const balanceQuery = (onlyOne) => `
     SELECT
       s.idSupplier,
       s.supplierName,
@@ -56,7 +58,7 @@ Supplier.getAllWithBalance = (result) => {
       (COALESCE(s.initialDebt, 0)
         + COALESCE(p.unpaidPurchases, 0)
         + COALESCE(svc.totalServiceDebt, 0)
-        + COALESCE(cr.totalCredits, 0)
+        - COALESCE(cr.totalCredits, 0)
         - COALESCE(pay.totalPayments, 0)
         - COALESCE(exp.totalExpensePayments, 0)
         - COALESCE(stOut.totalOut, 0)
@@ -69,7 +71,7 @@ Supplier.getAllWithBalance = (result) => {
       INNER JOIN PurchaseItems pi ON pi.purchaseId = p.idPurchase
       WHERE p.supplierId IS NOT NULL
         AND (p.paymentType IS NULL OR p.paymentType = 'credit')
-        AND p.status IN ('pending', 'received', 'partially_received')
+        AND p.status <> 'cancelled'
       GROUP BY p.supplierId
     ) p ON p.supplierId = s.idSupplier
     LEFT JOIN (
@@ -95,10 +97,13 @@ Supplier.getAllWithBalance = (result) => {
     ) exp ON exp.supplierId = s.idSupplier
     LEFT JOIN (SELECT fromSupplierId, SUM(amount) AS totalOut FROM SupplierTransfers GROUP BY fromSupplierId) stOut ON stOut.fromSupplierId = s.idSupplier
     LEFT JOIN (SELECT toSupplierId, SUM(amount) AS totalIn FROM SupplierTransfers GROUP BY toSupplierId) stIn ON stIn.toSupplierId = s.idSupplier
-    WHERE s.isActive = TRUE
+    WHERE ${onlyOne ? "s.idSupplier = ?" : "s.isActive = TRUE"}
     ORDER BY s.supplierName
   `;
-  db.query(query, [], (err, res) => {
+
+// Get all suppliers with current debt (what we owe them)
+Supplier.getAllWithBalance = (result) => {
+  db.query(balanceQuery(false), [], (err, res) => {
     if (err) {
       result(err, null);
       return;
@@ -160,32 +165,26 @@ Supplier.remove = (id, result) => {
   );
 };
 
-// Get summary stats for all suppliers
+// Balance of one supplier (same definition as the list)
+Supplier.getBalance = (id, result) => {
+  db.query(balanceQuery(true), [id], (err, rows) => {
+    if (err) return result(err, null);
+    if (!rows.length) return result({ kind: "not_found" }, null);
+    result(null, rows[0]);
+  });
+};
+
+// Summary over all active suppliers, from the same balances as the list
 Supplier.getSummaryStats = (result) => {
-  const query = `
-    SELECT 
-      COALESCE(SUM(s.initialDebt), 0) as totalInitialDebt,
-      (SELECT COALESCE(SUM(amount), 0) FROM Expenses WHERE supplierId IS NOT NULL) as totalPayments
-    FROM Suppliers s
-    WHERE s.isActive = TRUE
-  `;
-
-  db.query(query, [], (err, res) => {
-    if (err) {
-      result(err, null);
-      return;
-    }
-
-    const stats = res[0] || {};
-    const totalInitialDebt = parseFloat(stats.totalInitialDebt || 0);
-    const totalPayments = parseFloat(stats.totalPayments || 0);
-    const totalDebt = totalInitialDebt;
-    const remaining = totalDebt - totalPayments;
-
+  db.query(balanceQuery(false), [], (err, rows) => {
+    if (err) return result(err, null);
+    const sum = (k) => rows.reduce((t, r) => t + parseFloat(r[k] || 0), 0);
+    const totalPaid = sum("totalPayments") + sum("totalExpensePayments") + sum("totalCredits");
+    const remaining = sum("currentDebt");
     result(null, {
-      totalDebt: totalDebt,
-      totalPaid: totalPayments,
-      remaining: remaining
+      totalDebt: Math.round((remaining + totalPaid) * 100) / 100,
+      totalPaid: Math.round(totalPaid * 100) / 100,
+      remaining: Math.round(remaining * 100) / 100
     });
   });
 };

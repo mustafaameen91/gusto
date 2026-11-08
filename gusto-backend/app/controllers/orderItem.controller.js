@@ -1,5 +1,6 @@
 const OrderItem = require("../models/orderItem.model");
 const Order = require("../models/order.model");
+const { cancelOrderItems } = require("../services/cancelOrderItems.service");
 
 // Update item status
 exports.updateStatus = (req, res) => {
@@ -26,6 +27,21 @@ exports.updateStatus = (req, res) => {
       }
       return res.status(500).json({
         message: "Error retrieving order item"
+      });
+    }
+
+    // Cancelling changes money and stock: handled as its own guarded transaction
+    if (req.body.status === "cancelled") {
+      return cancelOrderItems(item.orderId, [Number(req.params.id)], { id: req.userId, role: req.userRole }, (errC, result) => {
+        if (errC) return res.status(errC.status || 500).json({ message: errC.message });
+        const io = req.app.get("io");
+        if (io) {
+          ["kitchen", "barista", "cashier"].forEach((room) => {
+            io.to(room).emit("item_status_changed", { orderItemId: req.params.id, orderId: item.orderId, status: "cancelled" });
+            io.to(room).emit("order_status_changed", { orderId: item.orderId, status: result.orderStatus });
+          });
+        }
+        res.json({ message: "تم إلغاء الصنف", ...result });
       });
     }
 

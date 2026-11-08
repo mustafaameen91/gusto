@@ -735,8 +735,8 @@
               </div>
               <v-divider v-if="totalReplacementCost > 0" class="my-2" />
               <div v-if="totalReplacementCost > 0" class="d-flex justify-space-between align-center">
-                <span class="font-weight-bold" style="color: var(--t-text);">صافي الاسترداد:</span>
-                <span class="text-h5 font-weight-bold" style="color: #e74c3c;">{{ netRefund.toLocaleString() }} د.ع</span>
+                <span class="font-weight-bold" style="color: var(--t-text);">{{ netRefund >= 0 ? 'صافي الاسترداد للعميل:' : 'يدفع العميل الفرق:' }}</span>
+                <span class="text-h5 font-weight-bold" :style="{ color: netRefund >= 0 ? '#e74c3c' : '#059669' }">{{ Math.abs(netRefund).toLocaleString() }} د.ع</span>
               </div>
             </v-card>
           </div>
@@ -1161,10 +1161,15 @@ const selectedReturnItems = computed(() => {
   return returnableItems.value.filter(i => i._selected)
 })
 
+// Same rule as the server: refund what the customer paid, i.e. the price after the order's discount
+const returnNetRatio = computed(() => {
+  const total = Number(returnOrder.value?.totalAmount || 0)
+  const gross = total + Number(returnOrder.value?.discount || 0)
+  return gross > 0 ? total / gross : 1
+})
 const totalReturnRefund = computed(() => {
-  return selectedReturnItems.value.reduce((sum, i) => {
-    return sum + (Number(i.price) * (i._returnQty || 1))
-  }, 0)
+  const sum = selectedReturnItems.value.reduce((t, i) => t + Math.round(Number(i.price) * (i._returnQty || 1) * returnNetRatio.value * 100) / 100, 0)
+  return Math.round(sum * 100) / 100
 })
 
 const totalReplacementCost = computed(() => {
@@ -1176,9 +1181,8 @@ const totalReplacementCost = computed(() => {
   }, 0)
 })
 
-const netRefund = computed(() => {
-  return Math.max(0, totalReturnRefund.value - totalReplacementCost.value)
-})
+// Negative when the replacement costs more: the customer pays the difference
+const netRefund = computed(() => totalReturnRefund.value - totalReplacementCost.value)
 
 const submitReturn = async () => {
   if (selectedReturnItems.value.length === 0) return

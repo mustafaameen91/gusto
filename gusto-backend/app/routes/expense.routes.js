@@ -1,4 +1,5 @@
 module.exports = (app) => {
+  const { requireRole } = require("../middleware/role.middleware");
   const expenses = require("../controllers/expense.controller");
   const authMiddleware = require("../middleware/auth.middleware");
   const multer = require("multer");
@@ -44,28 +45,30 @@ module.exports = (app) => {
   });
 
   // Image upload route
-  router.post("/upload-image", upload.single("image"), expenses.uploadImage);
+  const expenseWriters = requireRole(["admin"]);
+  const expenseReaders = requireRole(["admin", "supervisor"]);
+  router.post("/upload-image", expenseWriters, upload.single("image"), expenses.uploadImage);
 
   // Create a new expense
-  router.post("/", expenses.create);
+  router.post("/", expenseWriters, expenses.create);
 
   // Retrieve all expenses
-  router.get("/", expenses.findAll);
+  router.get("/", expenseReaders, expenses.findAll);
 
   // Get expense summary
-  router.get("/summary", expenses.getSummary);
+  router.get("/summary", expenseReaders, expenses.getSummary);
 
   // Get total expenses
-  router.get("/total", expenses.getTotal);
+  router.get("/total", expenseReaders, expenses.getTotal);
 
   // Retrieve a single expense
-  router.get("/:id", expenses.findOne);
+  router.get("/:id", expenseReaders, expenses.findOne);
 
   // Update an expense
-  router.put("/:id", expenses.update);
+  router.put("/:id", expenseWriters, expenses.update);
 
   // Delete an expense
-  router.delete("/:id", expenses.delete);
+  router.delete("/:id", expenseWriters, expenses.delete);
 
   app.use("/api/expenses", router);
 };

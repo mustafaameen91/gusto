@@ -145,6 +145,14 @@
                 </v-col>
                 <v-col cols="12" sm="6" md="3">
                   <div class="mb-2">
+                    <p class="text-body-2 mb-1" style="color: var(--t-text-dim); font-weight: 500;">مبيعات بطاقة (تذهب للبنك)</p>
+                    <h3 class="text-h6 font-weight-bold mb-0" style="color: #2563EB;">
+                      {{ Number(currentReceipt.cardSales || 0).toLocaleString() }} د.ع
+                    </h3>
+                  </div>
+                </v-col>
+                <v-col cols="12" sm="6" md="3">
+                  <div class="mb-2">
                     <p class="text-body-2 mb-1" style="color: var(--t-text-dim); font-weight: 500;">مبيعات آجل</p>
                     <h3 class="text-h6 font-weight-bold mb-0" style="color: #0D9488;">
                       {{ Number(currentReceipt.creditSales || 0).toLocaleString() }} د.ع
@@ -450,6 +458,10 @@
                 <strong class="close-summary-value" style="color: #059669;">+{{ Number(currentReceipt?.cashSales ?? 0).toLocaleString() }} د.ع</strong>
               </div>
               <div class="close-summary-row">
+                <span class="close-summary-label">مبيعات بطاقة (ليست في الصندوق)</span>
+                <strong class="close-summary-value" style="color: #2563EB;">{{ Number(currentReceipt?.cardSales ?? 0).toLocaleString() }} د.ع</strong>
+              </div>
+              <div class="close-summary-row">
                 <span class="close-summary-label">مبيعات آجل</span>
                 <strong class="close-summary-value" style="color: #0D9488;">+{{ Number(currentReceipt?.creditSales ?? 0).toLocaleString() }} د.ع</strong>
               </div>
@@ -588,6 +600,10 @@
               <div class="print-summary-row">
                 <span>مبيعات نقدية</span>
                 <strong style="color: #059669;">+{{ Number(lastCloseSummary?.cashSales ?? 0).toLocaleString() }} د.ع</strong>
+              </div>
+              <div class="print-summary-row">
+                <span>مبيعات بطاقة (ليست في الصندوق)</span>
+                <strong style="color: #2563EB;">{{ Number(lastCloseSummary?.cardSales ?? 0).toLocaleString() }} د.ع</strong>
               </div>
               <div class="print-summary-row">
                 <span>مبيعات آجل</span>
@@ -980,6 +996,12 @@ const loadTodayTransactions = async () => {
 }
 
 const loadStaff = async () => {
+  // Only admins may list staff; a cashier/supervisor opens the shift as themselves
+  if (authStore.user && authStore.user.role !== 'admin') {
+    staffList.value = [{ idStaff: authStore.user.id, fullName: authStore.user.fullName, email: authStore.user.email, role: authStore.user.role, isActive: true }]
+    selectedCashier.value = authStore.user.id
+    return
+  }
   try {
     const response = await staffAPI.getAll()
     // Filter only active staff with cashier or admin role

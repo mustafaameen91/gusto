@@ -3,6 +3,7 @@ const Expense = require("../models/expense.model");
 const Purchase = require("../models/purchase.model");
 const Order = require("../models/order.model");
 const InventoryTransaction = require("../models/inventoryTransaction.model");
+const { profitForPeriod } = require("../services/profit.service");
 
 // Helper function to get cafe day range (7 AM to 2:59 AM next day)
 const getCafeDayRange = (date) => {
@@ -38,6 +39,8 @@ exports.getFinancial = (req, res) => {
   const paymentMethod = (req.query.paymentMethod || 'all').toLowerCase();
 
   const paymentFilter = paymentMethod === 'cash' ? " AND orderType = 'cashier'" : paymentMethod === 'card' ? " AND orderType = 'card'" : '';
+  profitForPeriod(startDate, endDate, (errProfit, pf) => {
+    if (errProfit) return res.status(500).json({ message: errProfit.message });
 
   // Use cafe day logic for single day, calendar day for ranges
   let salesQuery, salesParams;
@@ -136,9 +139,7 @@ exports.getFinancial = (req, res) => {
         }
         
         const totalPurchases = parseFloat(purchaseResult[0]?.totalPurchases || 0);
-        const grossProfit = totalSales - totalPurchases;
-        // Net Profit = Total Revenue - Total Expenses
-        const netProfit = totalSales - totalExpenses;
+        // Profit uses the shared definition (net sales − cost of goods − operating expenses + other income)
         
         const baseResponse = {
           period: { startDate: startDate, endDate: endDate },
@@ -151,9 +152,14 @@ exports.getFinancial = (req, res) => {
           expenses: { totalExpenses: totalExpenses, expenseCount: expenseTotal?.expenseCount || 0 },
           purchases: { totalPurchases: totalPurchases },
           profit: {
-            grossProfit: grossProfit,
-            netProfit: netProfit,
-            profitMargin: totalSales > 0 ? ((netProfit / totalSales) * 100).toFixed(2) : 0
+            netSales: pf.netSales,
+            refunds: pf.refunds,
+            cogs: pf.cogs,
+            grossProfit: pf.grossProfit,
+            operatingExpenses: pf.operatingExpenses,
+            otherIncome: pf.otherIncome,
+            netProfit: pf.netProfit,
+            profitMargin: pf.profitMargin
           }
         };
         
@@ -257,6 +263,7 @@ exports.getFinancial = (req, res) => {
         });
       });
     });
+  });
   });
   });
 };
@@ -724,10 +731,8 @@ exports.getDailySummary = (req, res) => {
         
         const totalPurchases = parseFloat(purchaseResult[0]?.totalPurchases || 0);
         const purchaseCount = parseInt(purchaseResult[0]?.purchaseCount || 0);
-        // Net Profit = Total Revenue - Total Expenses
-        // صافي الربح = إجمالي الإيرادات - إجمالي المصروفات
-        const netProfit = totalSales - totalExpenses;
-        
+        profitForPeriod(date, date, (errProfit, pf) => {
+        if (errProfit) return res.status(500).json({ message: errProfit.message });
         res.json({
           date: date,
           sales: {
@@ -744,9 +749,13 @@ exports.getDailySummary = (req, res) => {
             purchaseCount: purchaseCount
           },
           summary: {
-            netProfit: netProfit,
-            profitMargin: totalSales > 0 ? ((netProfit / totalSales) * 100).toFixed(2) : 0
+            netSales: pf.netSales,
+            cogs: pf.cogs,
+            grossProfit: pf.grossProfit,
+            netProfit: pf.netProfit,
+            profitMargin: pf.profitMargin
           }
+        });
         });
       });
     });
@@ -868,37 +877,10 @@ function formatMySQLDateTime(d) {
 }
 
 exports.getProfitSinceOpening = (req, res) => {
-  const startDateTime = OPENING_DATE + ' 00:00:00';
-  const endDateTime = formatMySQLDateTime(new Date());
-
-  const salesQuery = `
-    SELECT COALESCE(SUM(totalAmount), 0) as total
-    FROM Orders
-    WHERE orderDate >= ? AND orderDate <= ?
-      AND status != 'cancelled'
-  `;
-  const expenseQuery = `
-    SELECT COALESCE(SUM(amount), 0) as total
-    FROM Expenses
-    WHERE expenseDate >= ? AND expenseDate <= ?
-  `;
-
-  db.query(salesQuery, [startDateTime, endDateTime], (err, salesRows) => {
-    if (err) {
-      return res.status(500).json({ message: err.message || "Error retrieving sales." });
-    }
-    const totalIncome = parseFloat(salesRows[0]?.total || 0);
-
-    const endDateOnly = endDateTime.split(' ')[0];
-    db.query(expenseQuery, [OPENING_DATE, endDateOnly], (err, expenseRows) => {
-      if (err) {
-        return res.status(500).json({ message: err.message || "Error retrieving expenses." });
-      }
-      const totalExpenses = parseFloat(expenseRows[0]?.total || 0);
-      const profit = totalIncome - totalExpenses;
-
-      res.json({ profit });
-    });
+  const { todayBusinessDate } = require("../services/businessDay");
+  profitForPeriod(OPENING_DATE, todayBusinessDate(), (err, pf) => {
+    if (err) return res.status(500).json({ message: err.message || "Error computing profit." });
+    res.json({ profit: pf.netProfit, ...pf });
   });
 };
 

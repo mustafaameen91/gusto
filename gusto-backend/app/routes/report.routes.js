@@ -1,4 +1,5 @@
 module.exports = (app) => {
+  const { requireRole } = require("../middleware/role.middleware");
   const reports = require("../controllers/report.controller");
   const authMiddleware = require("../middleware/auth.middleware");
 
@@ -6,6 +7,7 @@ module.exports = (app) => {
 
   // All routes require authentication
   router.use(authMiddleware.verifyToken);
+  router.use(requireRole(["admin"]));
 
   // Financial Report (Profit & Loss)
   router.get("/financial", reports.getFinancial);

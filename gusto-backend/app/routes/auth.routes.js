@@ -4,9 +4,10 @@ module.exports = (app) => {
 
   const router = require("express").Router();
 
-  // Public routes
+  // Public route
   router.post("/login", auth.login);
-  router.post("/register", auth.register);
+  // Creating staff accounts is admin-only (used by the Staff page)
+  router.post("/register", authMiddleware.verifyToken, authMiddleware.isAdmin, auth.register);
 
   // Credential verification (requires existing session token)
   router.post("/verify-credentials", authMiddleware.verifyToken, auth.verifyCredentials);

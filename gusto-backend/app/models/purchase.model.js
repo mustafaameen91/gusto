@@ -186,101 +186,104 @@ Purchase.receive = (id, receivedItems, receivedBy, result) => {
         return;
       }
 
-      // First, get current received quantities to calculate difference
-      const itemIds = receivedItems.map(item => item.idPurchaseItem);
+      const fail = (e) => connection.rollback(() => { connection.release(); result(e, null); });
+      const userError = (msg) => Object.assign(new Error(msg), { status: 400 });
+      const round = (n, d) => Math.round(n * 10 ** d) / 10 ** d;
+
+      // Lock the purchase and its items so two receive requests can't both add stock
       connection.query(
-        "SELECT idPurchaseItem, receivedQuantity FROM PurchaseItems WHERE idPurchaseItem IN (?)",
-        [itemIds],
-        (err, currentItems) => {
-          if (err) {
-            return connection.rollback(() => {
-              connection.release();
-              result(err, null);
-            });
-          }
+        "SELECT idPurchase, purchaseNumber, status, paymentType FROM Purchases WHERE idPurchase = ? FOR UPDATE",
+        [id],
+        (err, purchaseRows) => {
+          if (err) return fail(err);
+          if (!purchaseRows.length) return fail(Object.assign(new Error("Purchase not found"), { status: 404 }));
+          if (purchaseRows[0].status === "cancelled") return fail(userError("لا يمكن استلام أمر شراء ملغى"));
 
-          console.log('📊 Current items before update:', currentItems);
+          connection.query(
+            "SELECT idPurchaseItem, ingredientId, orderedQuantity, receivedQuantity, unitPrice FROM PurchaseItems WHERE purchaseId = ? FOR UPDATE",
+            [id],
+            (err, dbItems) => {
+              if (err) return fail(err);
+              const byId = new Map(dbItems.map((row) => [Number(row.idPurchaseItem), row]));
 
-          // Create map of current quantities
-          const currentQtyMap = {};
-          currentItems.forEach(item => {
-            currentQtyMap[item.idPurchaseItem] = parseFloat(item.receivedQuantity) || 0;
-          });
-
-          // Calculate NEW quantities (difference only)
-          const itemsWithDiff = receivedItems.map(item => {
-            const oldQty = currentQtyMap[item.idPurchaseItem] || 0;
-            const newTotal = parseFloat(item.receivedQuantity);
-            const difference = newTotal - oldQty;
-            
-            console.log(`  Item ${item.idPurchaseItem}: Old=${oldQty}, New Total=${newTotal}, Diff=${difference}`);
-            
-            return {
-              ...item,
-              difference: difference,
-              newTotal: newTotal
-            };
-          });
-
-          // Update purchase items with NEW TOTAL received quantities
-          const updatePromises = itemsWithDiff.map(item => {
-            return new Promise((resolve, reject) => {
-              connection.query(
-                "UPDATE PurchaseItems SET receivedQuantity = ? WHERE idPurchaseItem = ?",
-                [item.newTotal, item.idPurchaseItem],
-                (err) => {
-                  if (err) reject(err);
-                  else resolve();
+              // receivedQuantity from the screen is the new running total for the item.
+              // Item and ingredient come from the database, never from the request.
+              const changes = [];
+              for (const item of receivedItems) {
+                const row = byId.get(Number(item.idPurchaseItem));
+                if (!row) return fail(userError(`الصنف ${item.idPurchaseItem} لا يتبع أمر الشراء هذا`));
+                const newTotal = Number(item.receivedQuantity);
+                const ordered = Number(row.orderedQuantity);
+                const already = Number(row.receivedQuantity) || 0;
+                if (!Number.isFinite(newTotal) || newTotal < 0) return fail(userError("الكمية المستلمة غير صحيحة"));
+                if (newTotal < already - 0.0005) {
+                  return fail(userError(`لا يمكن تقليل الكمية المستلمة (${already}). استخدم تسوية المخزون بدلاً من ذلك`));
                 }
-              );
-            });
-          });
-
-          Promise.all(updatePromises)
-            .then(() => {
-              // Insert inventory transactions for ONLY THE DIFFERENCE (new items received this time)
-              const transactions = itemsWithDiff
-                .filter(item => item.difference > 0) // Only items with new quantity
-                .map(item => [
-                  item.ingredientId,
-                  'purchase',
-                  item.difference, // ⭐ Use DIFFERENCE, not total!
-                  null, // orderId
-                  receivedBy,
-                  `استلام من أمر شراء #${id}`
-                ]);
-
-              console.log('📝 Inventory transactions to insert:', transactions);
-
-              if (transactions.length === 0) {
-                console.log('⚠️ No new quantities to add to inventory');
-                // Still need to update purchase status, continue to next step
-                updatePurchaseStatus();
-                return;
+                if (newTotal > ordered + 0.0005) return fail(userError(`الكمية المستلمة (${newTotal}) أكبر من المطلوبة (${ordered})`));
+                const diff = round(newTotal - already, 3);
+                if (diff > 0) changes.push({ row, newTotal, diff });
               }
 
-              // Insert inventory transactions
-              connection.query(
-                "INSERT INTO InventoryTransactions (ingredientId, transactionType, quantity, orderId, recordedBy, notes) VALUES ?",
-                [transactions],
-                (err) => {
-                  if (err) {
-                    return connection.rollback(() => {
-                      connection.release();
-                      result(err, null);
-                    });
+              // For each newly received quantity: record it on the item, add it to stock,
+              // move the ingredient's cost to the weighted average, and log the movement.
+              // Books for what arrived now: Dr inventory; Cr suppliers (credit) or cash box (cash purchase)
+              const postReceipt = (next) => {
+                const value = round(changes.reduce((t, c) => t + c.diff * Number(c.row.unitPrice), 0), 2);
+                if (value <= 0) return next();
+                const purchase = purchaseRows[0];
+                const memo = `استلام أمر شراء ${purchase.purchaseNumber || "#" + id}`;
+                connection.query(
+                  `INSERT INTO JournalEntries (entryDate, sourceType, sourceId, status, memo, createdBy, postedBy, postedAt)
+                   VALUES (NOW(), 'PURCHASE_RECEIPT', ?, 'POSTED', ?, ?, ?, NOW())`,
+                  [id, memo, receivedBy, receivedBy],
+                  (err, je) => {
+                    if (err) return fail(err);
+                    connection.query(
+                      `INSERT INTO JournalLines (journalEntryId, accountId, debit, credit, lineMemo)
+                       SELECT ?, ps.inventoryAccountId, ?, 0, ? FROM PostingSettings ps WHERE ps.name = 'default'
+                       UNION ALL
+                       SELECT ?, IF(? = 'cash', ps.cashAccountId, ps.apAccountId), 0, ?, ? FROM PostingSettings ps WHERE ps.name = 'default'`,
+                      [je.insertId, value, memo, je.insertId, purchase.paymentType, value, memo],
+                      (err) => (err ? fail(err) : next())
+                    );
                   }
-                  console.log('✅ Inventory transactions inserted');
-                  updatePurchaseStatus();
-                }
-              );
-            })
-            .catch((err) => {
-              connection.rollback(() => {
-                connection.release();
-                result(err, null);
-              });
-            });
+                );
+              };
+
+              const applyChange = (i) => {
+                if (i >= changes.length) return postReceipt(updatePurchaseStatus);
+                const { row, newTotal, diff } = changes[i];
+                const price = Number(row.unitPrice);
+                connection.query(
+                  "UPDATE PurchaseItems SET receivedQuantity = ? WHERE idPurchaseItem = ?",
+                  [newTotal, row.idPurchaseItem],
+                  (err) => {
+                    if (err) return fail(err);
+                    // SET runs left to right: costPerUnit is computed from the stock before this receipt
+                    connection.query(
+                      `UPDATE Ingredients
+                       SET costPerUnit = CASE WHEN GREATEST(currentStock, 0) + ? > 0
+                                              THEN ROUND((GREATEST(currentStock, 0) * costPerUnit + ? * ?) / (GREATEST(currentStock, 0) + ?), 2)
+                                              ELSE ? END,
+                           currentStock = currentStock + ?
+                       WHERE idIngredient = ?`,
+                      [diff, diff, price, diff, price, diff, row.ingredientId],
+                      (err) => {
+                        if (err) return fail(err);
+                        connection.query(
+                          `INSERT INTO InventoryTransactions (ingredientId, transactionType, quantity, costPerUnit, totalCost, orderId, recordedBy, notes)
+                           VALUES (?, 'purchase', ?, ?, ?, NULL, ?, ?)`,
+                          [row.ingredientId, diff, price, round(diff * price, 2), receivedBy, `استلام من أمر شراء #${id}`],
+                          (err) => (err ? fail(err) : applyChange(i + 1))
+                        );
+                      }
+                    );
+                  }
+                );
+              };
+              applyChange(0);
+            }
+          );
 
           // Helper function to update purchase status
           function updatePurchaseStatus() {
@@ -403,7 +406,20 @@ Purchase.updateById = (id, purchase, result) => {
 
 // Delete purchase
 Purchase.remove = (id, result) => {
-  db.query("DELETE FROM Purchases WHERE idPurchase = ?", [id], (err, res) => {
+  // A purchase with received goods carries stock and supplier debt; deleting it would
+  // erase the debt but keep the stock, so only never-received purchases can be deleted.
+  db.query(
+    "SELECT COALESCE(SUM(receivedQuantity), 0) AS received FROM PurchaseItems WHERE purchaseId = ?",
+    [id],
+    (errCheck, rows) => {
+      if (errCheck) return result(errCheck, null);
+      if (Number(rows[0].received) > 0) {
+        return result({ kind: "has_received", message: "لا يمكن حذف أمر شراء تم استلام بضاعة منه" }, null);
+      }
+      deletePurchase();
+    }
+  );
+  const deletePurchase = () => db.query("DELETE FROM Purchases WHERE idPurchase = ?", [id], (err, res) => {
     if (err) {
       result(err, null);
       return;

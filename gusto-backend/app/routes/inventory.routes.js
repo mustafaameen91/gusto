@@ -14,7 +14,7 @@ module.exports = (app) => {
   router.get("/:id", inventory.findOne);
   router.get("/:id/transactions", inventory.getTransactions);
   router.put("/:id", authMiddleware.isStorage, inventory.update);
-  router.patch("/:id/adjust-stock", inventory.adjustStock);
+  router.patch("/:id/adjust-stock", authMiddleware.isStorage, inventory.adjustStock);
   router.delete("/:id", authMiddleware.isAdmin, inventory.delete);
 
   app.use("/api/inventory", router);

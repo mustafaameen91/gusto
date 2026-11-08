@@ -522,7 +522,8 @@ Order.getSummaryByShift = (dailyReceiptId, result) => {
   const query = `
     SELECT
       COUNT(*) AS orderCount,
-      COALESCE(SUM(CASE WHEN saleType = 'cash' THEN totalAmount ELSE 0 END), 0) AS cashSales,
+      COALESCE(SUM(CASE WHEN saleType = 'cash' AND orderType <> 'card' THEN totalAmount ELSE 0 END), 0) AS cashSales,
+      COALESCE(SUM(CASE WHEN saleType = 'cash' AND orderType = 'card' THEN totalAmount ELSE 0 END), 0) AS cardSales,
       COALESCE(SUM(CASE WHEN saleType = 'credit' THEN totalAmount ELSE 0 END), 0) AS creditSales,
       COALESCE(SUM(totalAmount), 0) AS totalSales
     FROM Orders
