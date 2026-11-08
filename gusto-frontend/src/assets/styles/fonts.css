@@ -1,0 +1,60 @@
+/* Tajawal — bundled locally for offline use */
+@font-face {
+  font-family: 'Tajawal';
+  src: url('../font/Tajawal-Medium.ttf') format('truetype');
+  font-weight: normal;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Tajawal';
+  src: url('../font/Tajawal-Bold.ttf') format('truetype');
+  font-weight: bold;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* Apply Tajawal globally */
+body {
+  font-family: 'Tajawal', 'Roboto', sans-serif !important;
+}
+
+.v-application {
+  font-family: 'Tajawal', 'Roboto', sans-serif !important;
+}
+
+/* Apply to all text elements */
+* {
+  font-family: 'Tajawal', 'Roboto', sans-serif !important;
+}
+
+/* Vuetify specific overrides */
+.v-btn,
+.v-card,
+.v-list,
+.v-toolbar,
+.v-app-bar,
+.v-navigation-drawer,
+.v-data-table,
+.v-input,
+.v-field,
+.v-label,
+.v-chip,
+.v-select,
+.v-textarea,
+.v-text-field {
+  font-family: 'Tajawal', 'Roboto', sans-serif !important;
+}
+
+/* Headers */
+h1, h2, h3, h4, h5, h6 {
+  font-family: 'Tajawal', 'Roboto', sans-serif !important;
+  font-weight: bold;
+}
+
+/* Buttons with bold text */
+.v-btn {
+  font-weight: 500;
+}
+

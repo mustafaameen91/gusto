@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html dir="rtl" lang="ar">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>خطأ في الاتصال</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+    
+    body {
+      font-family: Arial, sans-serif;
+      direction: rtl;
+      background: linear-gradient(135deg, #023F4B 0%, #6F4E37 100%);
+      color: white;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+      text-align: center;
+    }
+    
+    .error-container {
+      padding: 40px;
+      max-width: 600px;
+    }
+    
+    .error-icon {
+      font-size: 80px;
+      margin-bottom: 20px;
+    }
+    
+    h1 {
+      font-size: 32px;
+      margin-bottom: 20px;
+    }
+    
+    p {
+      font-size: 18px;
+      margin-bottom: 30px;
+      opacity: 0.9;
+    }
+    
+    .instructions {
+      background: rgba(255, 255, 255, 0.1);
+      padding: 30px;
+      border-radius: 12px;
+      text-align: right;
+      line-height: 1.8;
+    }
+    
+    .command {
+      background: rgba(0, 0, 0, 0.3);
+      padding: 10px 15px;
+      border-radius: 6px;
+      font-family: 'Courier New', monospace;
+      margin: 10px 0;
+      display: inline-block;
+      direction: ltr;
+    }
+  </style>
+</head>
+<body>
+  <div class="error-container">
+    <div class="error-icon">⚠️</div>
+    <h1>خطأ في الاتصال بالخادم</h1>
+    <p>لا يمكن الاتصال بخادم التطبيق</p>
+    
+    <div class="instructions">
+      <h3 style="margin-bottom: 15px;">📋 يرجى التأكد من:</h3>
+      <ol style="text-align: right;">
+        <li>تشغيل خادم الـ Backend على المنفذ 3000</li>
+        <li>تشغيل خادم الـ Frontend على المنفذ 8080</li>
+      </ol>
+      
+      <h3 style="margin: 20px 0 15px;">🚀 أوامر التشغيل:</h3>
+      <div style="margin-bottom: 10px;">
+        <strong>Backend:</strong>
+        <div class="command">cd gusto-backend && npm start</div>
+      </div>
+      <div>
+        <strong>Frontend:</strong>
+        <div class="command">cd gusto-frontend && npm run dev</div>
+      </div>
+      
+      <p style="margin-top: 25px; font-size: 14px; opacity: 0.8;">
+        بعد تشغيل الخوادم، قم بإعادة تشغيل التطبيق
+      </p>
+    </div>
+  </div>
+</body>
+</html>
+

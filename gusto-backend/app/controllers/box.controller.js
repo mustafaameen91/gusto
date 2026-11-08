@@ -1,0 +1,624 @@
+const db = require("../models/db");
+const Expense = require("../models/expense.model");
+const Purchase = require("../models/purchase.model");
+const Order = require("../models/order.model");
+const DailyReceipt = require("../models/dailyReceipt.model");
+const OtherIncome = require("../models/otherIncome.model");
+const PostingSettings = require("../models/postingSettings.model");
+
+// Get current cash box balance
+exports.getBalance = (req, res) => {
+  const today = new Date().toISOString().split('T')[0];
+  
+  // Get current open receipt
+  DailyReceipt.findByDate(today, (err, receipt) => {
+    if (err && err.kind !== "not_found") {
+      return res.status(500).json({
+        message: err.message || "Error retrieving cash box balance."
+      });
+    }
+    
+    // If no open receipt, check if there's a closed receipt for today
+    if (!receipt) {
+      // Try to get the last closed receipt for today
+      const closedReceiptQuery = `
+        SELECT * FROM DailyReceipts 
+        WHERE receiptDate = ? AND isClosed = TRUE 
+        ORDER BY closedAt DESC 
+        LIMIT 1
+      `;
+      
+      db.query(closedReceiptQuery, [today], (err, closedReceipts) => {
+        if (err) {
+          return res.status(500).json({
+            message: err.message || "Error retrieving closed receipt."
+          });
+        }
+        
+        // If there's a closed receipt, calculate all values properly
+        if (closedReceipts && closedReceipts.length > 0) {
+          const closedReceipt = closedReceipts[0];
+          
+          // Get actual sales for the date (might be more accurate than stored value)
+          Order.getDailySummary(today, (err, salesSummary) => {
+            const totalSales = parseFloat(salesSummary?.totalSales || closedReceipt.totalSales || 0);
+            
+            // Get actual expenses for the date
+            Expense.getTotal(today, today, (err, expenseTotal) => {
+              const totalExpenses = parseFloat(expenseTotal?.totalExpenses || closedReceipt.totalExpenses || 0);
+              
+              // Get actual purchases for the date
+              const purchaseQuery = `
+                SELECT COALESCE(SUM(totalAmount), 0) as totalPurchases
+                FROM Purchases
+                WHERE DATE(purchaseDate) = ? 
+                  AND status IN ('received', 'partially_received')
+              `;
+              
+              db.query(purchaseQuery, [today], (err, purchaseResult) => {
+                if (err) {
+                  return res.status(500).json({
+                    message: err.message || "Error retrieving purchases."
+                  });
+                }
+                
+                const totalPurchases = parseFloat(purchaseResult[0]?.totalPurchases || 0);
+                const openingCash = parseFloat(closedReceipt.openingCash || 0);
+                
+                // For closed receipt, use the actual closing cash
+                const currentBalance = parseFloat(closedReceipt.closingCash || 0);
+                const expectedBalance = parseFloat(closedReceipt.expectedCash || 0);
+                
+                // Other incomes for this closed shift (were included in expectedCash at close)
+                OtherIncome.getTotalsByShift(closedReceipt.idDailyReceipt, (oiErr, oiTotals) => {
+                  const totalOtherIncomes = oiTotals && !oiErr ? (oiTotals.total || 0) : 0;
+                  return res.json({
+                    openingCash: openingCash,
+                    totalSales: totalSales,
+                    totalExpenses: totalExpenses,
+                    totalPurchases: totalPurchases,
+                    totalOtherIncomes: totalOtherIncomes,
+                    currentBalance: currentBalance,
+                    expectedBalance: expectedBalance,
+                    receiptDate: closedReceipt.receiptDate,
+                    isOpen: false,
+                    isClosed: true,
+                    closingCash: currentBalance
+                  });
+                });
+              });
+            });
+          });
+          return; // Exit early
+        }
+        
+        // No receipt at all for today
+        return res.json({
+          openingCash: 0,
+          totalSales: 0,
+          totalExpenses: 0,
+          totalPurchases: 0,
+          totalOtherIncomes: 0,
+          currentBalance: 0,
+          expectedBalance: 0,
+          isOpen: false,
+          isClosed: false
+        });
+      });
+      return; // Exit early
+    }
+    
+    // We have an open receipt
+    const openingCash = parseFloat(receipt.openingCash || 0);
+    
+    // Get today's sales
+    Order.getDailySummary(today, (err, salesSummary) => {
+      const totalSales = parseFloat(salesSummary?.totalSales || 0);
+      
+      // Get today's expenses
+      Expense.getTotal(today, today, (err, expenseTotal) => {
+        const totalExpenses = parseFloat(expenseTotal?.totalExpenses || 0);
+        
+        // Get today's purchases (received purchases only)
+        const purchaseQuery = `
+          SELECT COALESCE(SUM(totalAmount), 0) as totalPurchases
+          FROM Purchases
+          WHERE DATE(purchaseDate) = ? 
+            AND status IN ('received', 'partially_received')
+        `;
+        
+        db.query(purchaseQuery, [today], (err, purchaseResult) => {
+          if (err) {
+            return res.status(500).json({
+              message: err.message || "Error retrieving purchases."
+            });
+          }
+          
+          const totalPurchases = parseFloat(purchaseResult[0]?.totalPurchases || 0);
+
+          // Other incomes (cash): shift-linked + unlinked for today — add to box balance
+          OtherIncome.getTotalsForBox(receipt.receiptDate, receipt.idDailyReceipt, (oiErr, oiTotals) => {
+            const otherIncomesCash = oiTotals && !oiErr ? (oiTotals.cashTotal || 0) : 0;
+            const currentBalance = openingCash + totalSales - totalExpenses - totalPurchases + otherIncomesCash;
+            const expectedBalance = openingCash + totalSales - totalExpenses - totalPurchases + otherIncomesCash;
+            
+            res.json({
+              openingCash: openingCash,
+              totalSales: totalSales,
+              totalExpenses: totalExpenses,
+              totalPurchases: totalPurchases,
+              totalOtherIncomes: oiTotals && !oiErr ? (oiTotals.total || 0) : 0,
+              otherIncomesCash: otherIncomesCash,
+              currentBalance: currentBalance,
+              expectedBalance: expectedBalance,
+              receiptDate: receipt.receiptDate,
+              isOpen: !receipt.isClosed || false,
+              isClosed: false
+            });
+          });
+        });
+      });
+    });
+  });
+};
+
+// Get box summary (daily/weekly/monthly)
+exports.getSummary = (req, res) => {
+  const period = req.query.period || 'today'; // today, week, month
+  const today = new Date();
+  let startDate, endDate;
+  
+  switch(period) {
+    case 'today':
+      startDate = today.toISOString().split('T')[0];
+      endDate = startDate;
+      break;
+    case 'week':
+      startDate = new Date(today);
+      startDate.setDate(today.getDate() - 7);
+      startDate = startDate.toISOString().split('T')[0];
+      endDate = today.toISOString().split('T')[0];
+      break;
+    case 'month':
+      startDate = new Date(today.getFullYear(), today.getMonth(), 1);
+      startDate = startDate.toISOString().split('T')[0];
+      endDate = today.toISOString().split('T')[0];
+      break;
+    default:
+      startDate = req.query.startDate || today.toISOString().split('T')[0];
+      endDate = req.query.endDate || today.toISOString().split('T')[0];
+  }
+  
+  // Helper function to get cafe day range (7 AM to 2:59 AM next day)
+  const getCafeDayRange = (date) => {
+    const selectedDate = new Date(date + 'T00:00:00');
+    const startDate = new Date(selectedDate);
+    startDate.setHours(7, 0, 0, 0);
+    
+    const endDate = new Date(selectedDate);
+    endDate.setDate(endDate.getDate() + 1);
+    endDate.setHours(2, 59, 59, 999);
+    
+    const formatDateForMySQL = (date) => {
+      const year = date.getFullYear();
+      const month = String(date.getMonth() + 1).padStart(2, '0');
+      const day = String(date.getDate()).padStart(2, '0');
+      const hours = String(date.getHours()).padStart(2, '0');
+      const minutes = String(date.getMinutes()).padStart(2, '0');
+      const seconds = String(date.getSeconds()).padStart(2, '0');
+      return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
+    };
+    
+    return {
+      startDateTime: formatDateForMySQL(startDate),
+      endDateTime: formatDateForMySQL(endDate)
+    };
+  };
+  
+  // For "today" period, use cafe day logic. For ranges, use simple date comparison
+  let salesQuery, salesParams;
+  if (period === 'today') {
+    const cafeDay = getCafeDayRange(startDate);
+    salesQuery = `
+      SELECT 
+        COALESCE(SUM(totalAmount), 0) as totalSales,
+        COUNT(*) as orderCount
+      FROM Orders
+      WHERE orderDate >= ? AND orderDate <= ?
+        AND status != 'cancelled'
+    `;
+    salesParams = [cafeDay.startDateTime, cafeDay.endDateTime];
+  } else {
+    // For week/month ranges, use simple date comparison (start of first day to end of last day)
+    const rangeStart = new Date(startDate + 'T00:00:00');
+    const rangeEnd = new Date(endDate + 'T23:59:59');
+    salesQuery = `
+      SELECT 
+        COALESCE(SUM(totalAmount), 0) as totalSales,
+        COUNT(*) as orderCount
+      FROM Orders
+      WHERE orderDate >= ? AND orderDate <= ?
+        AND status != 'cancelled'
+    `;
+    salesParams = [
+      rangeStart.toISOString().slice(0, 19).replace('T', ' '),
+      rangeEnd.toISOString().slice(0, 19).replace('T', ' ')
+    ];
+  }
+  
+  // Get expenses
+  Expense.getTotal(startDate, endDate, (err, expenseTotal) => {
+    const totalExpenses = parseFloat(expenseTotal?.totalExpenses || 0);
+    
+    // Get purchases
+    const purchaseQuery = `
+      SELECT COALESCE(SUM(totalAmount), 0) as totalPurchases,
+             COUNT(*) as purchaseCount
+      FROM Purchases
+      WHERE DATE(purchaseDate) >= ? AND DATE(purchaseDate) <= ?
+        AND status IN ('received', 'partially_received')
+    `;
+    
+    db.query(salesQuery, salesParams, (err, salesResult) => {
+      if (err) {
+        return res.status(500).json({
+          message: err.message || "Error retrieving sales summary."
+        });
+      }
+      
+      const totalSales = parseFloat(salesResult[0]?.totalSales || 0);
+      const orderCount = parseInt(salesResult[0]?.orderCount || 0);
+      
+      db.query(purchaseQuery, [startDate, endDate], (err, purchaseResult) => {
+        if (err) {
+          return res.status(500).json({
+            message: err.message || "Error retrieving purchase summary."
+          });
+        }
+        
+        const totalPurchases = parseFloat(purchaseResult[0]?.totalPurchases || 0);
+        const purchaseCount = parseInt(purchaseResult[0]?.purchaseCount || 0);
+        
+        // Net Profit = Sales Revenue - Cost of Sales (Purchases)
+        const netProfit = totalSales - totalPurchases;
+        
+        res.json({
+          period: period,
+          startDate: startDate,
+          endDate: endDate,
+          totalSales: totalSales,
+          totalExpenses: totalExpenses,
+          totalPurchases: totalPurchases,
+          netProfit: netProfit,
+          orderCount: orderCount,
+          purchaseCount: purchaseCount,
+          expenseCount: expenseTotal?.expenseCount || 0
+        });
+      });
+    });
+  });
+};
+
+// Get all transactions (sales, expenses, purchases)
+exports.getTransactions = (req, res) => {
+  const startDate = req.query.startDate || new Date().toISOString().split('T')[0];
+  const endDate = req.query.endDate || new Date().toISOString().split('T')[0];
+  
+  const transactions = [];
+  
+  // Helper function for cafe day range (reuse from above)
+  const getCafeDayRange = (date) => {
+    const selectedDate = new Date(date + 'T00:00:00');
+    const startDate = new Date(selectedDate);
+    startDate.setHours(7, 0, 0, 0);
+    
+    const endDate = new Date(selectedDate);
+    endDate.setDate(endDate.getDate() + 1);
+    endDate.setHours(2, 59, 59, 999);
+    
+    const formatDateForMySQL = (date) => {
+      const year = date.getFullYear();
+      const month = String(date.getMonth() + 1).padStart(2, '0');
+      const day = String(date.getDate()).padStart(2, '0');
+      const hours = String(date.getHours()).padStart(2, '0');
+      const minutes = String(date.getMinutes()).padStart(2, '0');
+      const seconds = String(date.getSeconds()).padStart(2, '0');
+      return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
+    };
+    
+    return {
+      startDateTime: formatDateForMySQL(startDate),
+      endDateTime: formatDateForMySQL(endDate)
+    };
+  };
+  
+  // Get sales (orders) - use cafe day logic for single day
+  let salesQuery, salesParams;
+  if (startDate === endDate) {
+    const cafeDay = getCafeDayRange(startDate);
+    salesQuery = `
+      SELECT 
+        idOrder as id,
+        'sale' as type,
+        orderNumber as reference,
+        totalAmount as amount,
+        orderDate as date,
+        'مبيعات' as description,
+        cashierId as userId
+      FROM Orders
+      WHERE orderDate >= ? AND orderDate <= ?
+        AND status != 'cancelled'
+      ORDER BY orderDate DESC
+    `;
+    salesParams = [cafeDay.startDateTime, cafeDay.endDateTime];
+  } else {
+    salesQuery = `
+      SELECT 
+        idOrder as id,
+        'sale' as type,
+        orderNumber as reference,
+        totalAmount as amount,
+        orderDate as date,
+        'مبيعات' as description,
+        cashierId as userId
+      FROM Orders
+      WHERE DATE(orderDate) >= ? AND DATE(orderDate) <= ?
+        AND status != 'cancelled'
+      ORDER BY orderDate DESC
+    `;
+    salesParams = [startDate, endDate];
+  }
+  
+  // Get expenses
+  const expensesQuery = `
+    SELECT 
+      e.idExpense as id,
+      'expense' as type,
+      e.receiptNumber as reference,
+      e.amount,
+      e.expenseDate as date,
+      CONCAT(e.category, ' - ', COALESCE(e.description, '')) as description,
+      e.recordedBy as userId
+    FROM Expenses e
+    WHERE e.expenseDate >= ? AND e.expenseDate <= ?
+    ORDER BY e.expenseDate DESC
+  `;
+  
+  // Get purchases
+  const purchasesQuery = `
+    SELECT 
+      p.idPurchase as id,
+      'purchase' as type,
+      p.purchaseNumber as reference,
+      p.totalAmount as amount,
+      p.purchaseDate as date,
+      CONCAT('شراء من ', p.supplierName) as description,
+      p.createdBy as userId
+    FROM Purchases p
+    WHERE DATE(p.purchaseDate) >= ? AND DATE(p.purchaseDate) <= ?
+      AND p.status IN ('received', 'partially_received')
+    ORDER BY p.purchaseDate DESC
+  `;
+  
+  db.query(salesQuery, salesParams, (err, sales) => {
+    if (err) {
+      return res.status(500).json({
+        message: err.message || "Error retrieving sales transactions."
+      });
+    }
+    
+    db.query(expensesQuery, [startDate, endDate], (err, expenses) => {
+      if (err) {
+        return res.status(500).json({
+          message: err.message || "Error retrieving expense transactions."
+        });
+      }
+      
+      db.query(purchasesQuery, [startDate, endDate], (err, purchases) => {
+        if (err) {
+          return res.status(500).json({
+            message: err.message || "Error retrieving purchase transactions."
+          });
+        }
+
+        // Get other incomes for the date range (shift-linked + unlinked)
+        OtherIncome.getListForTransactions(startDate, endDate, (oiErr, otherIncomes) => {
+          const oiList = otherIncomes || [];
+          const oiTxns = oiList.map(oi => ({
+            id: oi.idOtherIncome,
+            type: 'other_income',
+            reference: null,
+            amount: parseFloat(oi.amount || 0),
+            date: oi.date,
+            description: oi.incomeAccountName ? `إيرادات خارجية: ${oi.incomeAccountName}` : 'إيرادات خارجية',
+            userId: null
+          }));
+        
+          // Combine all transactions
+          transactions.push(...sales.map(s => ({ ...s, amount: parseFloat(s.amount) })));
+          transactions.push(...expenses.map(e => ({ ...e, amount: -parseFloat(e.amount) })));
+          transactions.push(...purchases.map(p => ({ ...p, amount: -parseFloat(p.amount) })));
+          transactions.push(...oiTxns);
+        
+          // Sort by date descending
+          transactions.sort((a, b) => new Date(b.date) - new Date(a.date));
+        
+          res.json(transactions);
+        });
+      });
+    });
+  });
+};
+
+// Get per-account balances from JournalLines
+exports.getAccountBalances = (req, res) => {
+  const query = `
+    SELECT
+      a.idAccount,
+      a.code        AS accountCode,
+      a.name        AS accountName,
+      a.accountType,
+      COALESCE(SUM(jl.debit), 0)  AS totalDebit,
+      COALESCE(SUM(jl.credit), 0) AS totalCredit,
+      COUNT(jl.idJournalLine)      AS transactionCount
+    FROM Accounts a
+    LEFT JOIN JournalLines jl ON jl.accountId = a.idAccount
+    WHERE a.isActive = 1
+    GROUP BY a.idAccount, a.code, a.name, a.accountType
+    ORDER BY a.code ASC
+  `;
+
+  db.query(query, [], (err, rows) => {
+    if (err) {
+      return res.status(500).json({
+        message: err.message || "Error retrieving account balances."
+      });
+    }
+
+    const result = (rows || []).map(r => {
+      const totalDebit  = parseFloat(r.totalDebit)  || 0;
+      const totalCredit = parseFloat(r.totalCredit) || 0;
+      const type = (r.accountType || '').toUpperCase();
+      const isDebitNormal = ['ASSET', 'EXPENSE', 'COST'].includes(type);
+      const balance = isDebitNormal
+        ? totalDebit - totalCredit
+        : totalCredit - totalDebit;
+
+      return {
+        idAccount: r.idAccount,
+        accountCode: r.accountCode,
+        accountName: r.accountName,
+        accountType: r.accountType,
+        totalDebit,
+        totalCredit,
+        balance,
+        transactionCount: parseInt(r.transactionCount) || 0
+      };
+    });
+
+    res.json(result);
+  });
+};
+
+// Get transactions for a specific account
+exports.getAccountTransactions = (req, res) => {
+  const accountId = req.params.accountId;
+  const startDate = req.query.startDate || null;
+  const endDate   = req.query.endDate   || null;
+
+  let query = `
+    SELECT
+      jl.idJournalLine,
+      jl.debit,
+      jl.credit,
+      jl.lineMemo,
+      je.idJournalEntry,
+      je.entryDate,
+      je.sourceType,
+      je.memo AS entryMemo,
+      je.dailyReceiptId
+    FROM JournalLines jl
+    JOIN JournalEntries je ON je.idJournalEntry = jl.journalEntryId
+    WHERE jl.accountId = ?
+  `;
+  const params = [accountId];
+
+  if (startDate) {
+    query += ` AND je.entryDate >= ?`;
+    params.push(startDate);
+  }
+  if (endDate) {
+    query += ` AND je.entryDate <= ?`;
+    params.push(endDate);
+  }
+
+  query += ` ORDER BY je.entryDate DESC, jl.idJournalLine DESC`;
+
+  db.query(query, params, (err, rows) => {
+    if (err) {
+      return res.status(500).json({
+        message: err.message || "Error retrieving account transactions."
+      });
+    }
+    const list = (rows || []).map(r => ({
+      idJournalLine: r.idJournalLine,
+      debit: parseFloat(r.debit) || 0,
+      credit: parseFloat(r.credit) || 0,
+      lineMemo: r.lineMemo,
+      entryDate: r.entryDate,
+      sourceType: r.sourceType,
+      entryMemo: r.entryMemo,
+      dailyReceiptId: r.dailyReceiptId
+    }));
+    res.json(list);
+  });
+};
+
+// Transfer money between boxes/accounts (e.g. cash ↔ bank)
+exports.transfer = (req, res) => {
+  const fromAccountId = req.body.fromAccountId != null ? parseInt(req.body.fromAccountId, 10) : null;
+  const toAccountId = req.body.toAccountId != null ? parseInt(req.body.toAccountId, 10) : null;
+  const amount = parseFloat(req.body.amount);
+  const notes = req.body.notes || null;
+
+  if (!fromAccountId || !toAccountId || fromAccountId === toAccountId) {
+    return res.status(400).json({
+      message: "من الحساب وإلى الحساب مطلوبان ويجب أن يكونا مختلفين."
+    });
+  }
+  if (amount == null || isNaN(amount) || amount <= 0) {
+    return res.status(400).json({
+      message: "المبلغ يجب أن يكون رقماً موجباً."
+    });
+  }
+
+  PostingSettings.getByName("default", (errPs, ps) => {
+    if (errPs || !ps) {
+      return res.status(500).json({ message: "لم يتم العثور على إعدادات الترحيل." });
+    }
+
+    const entryDate = new Date().toISOString().slice(0, 19).replace("T", " ");
+    const memo = notes || "تحويل بين الصناديق";
+    const userId = req.userId || null;
+
+    db.query(
+      `INSERT INTO JournalEntries (entryDate, sourceType, status, memo, createdBy)
+       VALUES (?, 'TRANSFER', 'POSTED', ?, ?)`,
+      [entryDate, memo, userId],
+      (errJe, jeRes) => {
+        if (errJe) {
+          return res.status(500).json({
+            message: errJe.message || "فشل إنشاء القيد المحاسبي."
+          });
+        }
+        const journalEntryId = jeRes.insertId;
+        const lines = [
+          [journalEntryId, toAccountId, amount, 0, memo],
+          [journalEntryId, fromAccountId, 0, amount, memo]
+        ];
+        db.query(
+          `INSERT INTO JournalLines (journalEntryId, accountId, debit, credit, lineMemo) VALUES ?`,
+          [lines],
+          (errLines) => {
+            if (errLines) {
+              db.query("DELETE FROM JournalEntries WHERE idJournalEntry = ?", [journalEntryId], () => {});
+              return res.status(500).json({
+                message: errLines.message || "فشل تسجيل القيد."
+              });
+            }
+            res.status(201).json({
+              message: "تم التحويل بنجاح",
+              journalEntryId,
+              fromAccountId,
+              toAccountId,
+              amount
+            });
+          }
+        );
+      }
+    );
+  });
+};
+
+module.exports = exports;
+

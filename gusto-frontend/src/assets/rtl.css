@@ -1,0 +1,98 @@
+/* RTL Global Styles for Arabic */
+* {
+  direction: rtl !important;
+  text-align: right;
+}
+
+body {
+  direction: rtl !important;
+}
+
+/* Vuetify specific overrides */
+.v-application {
+  direction: rtl !important;
+}
+
+.v-navigation-drawer {
+  right: 0 !important;
+  left: auto !important;
+}
+
+.v-app-bar {
+  direction: rtl !important;
+}
+
+/* Text alignment fixes */
+.text-left {
+  text-align: right !important;
+}
+
+.text-right {
+  text-align: left !important;
+}
+
+/* Margins and padding fixes for RTL */
+.mr-2 {
+  margin-left: 8px !important;
+  margin-right: 0 !important;
+}
+
+.ml-2 {
+  margin-right: 8px !important;
+  margin-left: 0 !important;
+}
+
+.mr-3 {
+  margin-left: 12px !important;
+  margin-right: 0 !important;
+}
+
+.ml-3 {
+  margin-right: 12px !important;
+  margin-left: 0 !important;
+}
+
+/* Icons - No longer needed with Phosphor Icons */
+/* Phosphor icons handle RTL directionality automatically */
+
+/* Data tables */
+.v-data-table {
+  direction: rtl !important;
+}
+
+.v-data-table thead th {
+  text-align: right !important;
+}
+
+.v-data-table tbody td {
+  text-align: right !important;
+}
+
+/* Forms */
+.v-input {
+  direction: rtl !important;
+}
+
+.v-field__input {
+  text-align: right !important;
+}
+
+/* Dialogs */
+.v-dialog {
+  direction: rtl !important;
+}
+
+/* Chips and badges */
+.v-chip {
+  direction: rtl !important;
+}
+
+/* Lists */
+.v-list-item {
+  direction: rtl !important;
+}
+
+.v-list-item__prepend {
+  margin-inline-end: 16px !important;
+  margin-inline-start: 0 !important;
+}

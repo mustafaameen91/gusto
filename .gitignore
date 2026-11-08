@@ -1,0 +1,21 @@
+# Dependencies and lock files
+node_modules/
+package-lock.json
+
+# Secrets
+.env
+.env.*
+
+# Uploaded files (keep the folder)
+gusto-backend/uploads/*
+!gusto-backend/uploads/.gitkeep
+
+# Builds
+dist/
+gusto-backend/gusto-frontend/
+
+# OS / editor
+.DS_Store
+.vscode/
+.idea/
+*.log
