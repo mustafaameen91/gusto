@@ -7,15 +7,20 @@ const { postShift } = require("../services/postShift.service");
 const db = require("../models/db");
 
 // Other incomes of the shift, plus cash collected from credit customers, minus cash
-// refunds for returns (an exchange where the customer paid extra adds instead).
+// refunds for returns (an exchange where the customer paid extra adds instead),
+// minus cash purchases paid from the drawer.
 function shiftCashExtras(dailyReceiptId, cb) {
   OtherIncome.getTotalsByShift(dailyReceiptId, (oiErr, oiTotals) => {
     db.query(
       `SELECT COALESCE(SUM(amount), 0)
-              - (SELECT COALESCE(SUM(totalRefundAmount), 0) FROM OrderReturns WHERE dailyReceiptId = ? AND refundMethod = 'cash') AS customerCash
+              - (SELECT COALESCE(SUM(totalRefundAmount), 0) FROM OrderReturns WHERE dailyReceiptId = ? AND refundMethod = 'cash') AS customerCash,
+              (SELECT COALESCE(SUM(jl.credit), 0) FROM JournalLines jl
+                 JOIN JournalEntries je ON je.idJournalEntry = jl.journalEntryId
+                 JOIN PostingSettings ps ON ps.name = 'default' AND jl.accountId = ps.cashAccountId
+               WHERE je.sourceType = 'PURCHASE_RECEIPT' AND je.dailyReceiptId = ?) AS cashPurchases
        FROM CustomerReceipts WHERE dailyReceiptId = ? AND paymentMethod = 'cash'`,
-      [dailyReceiptId, dailyReceiptId],
-      (crErr, crRows) => cb(oiErr, oiTotals, crErr ? 0 : parseFloat(crRows[0].customerCash || 0))
+      [dailyReceiptId, dailyReceiptId, dailyReceiptId],
+      (crErr, crRows) => cb(oiErr, oiTotals, crErr ? 0 : parseFloat(crRows[0].customerCash || 0), crErr ? 0 : parseFloat(crRows[0].cashPurchases || 0))
     );
   });
 }
@@ -71,12 +76,13 @@ function withShiftCash(data, callback) {
       data.totalExpenses = totalExpenses;
       data.cashExpenses = cashExpenses;
 
-      shiftCashExtras(dailyReceiptId, (oiErr, oiTotals, customerCash) => {
+      shiftCashExtras(dailyReceiptId, (oiErr, oiTotals, customerCash, cashPurchases) => {
         const otherIncomesCash = oiTotals && !oiErr ? (oiTotals.cashTotal || 0) : 0;
         data.totalOtherIncomes = oiTotals && !oiErr ? (oiTotals.total || 0) : 0;
         data.otherIncomesCash = otherIncomesCash;
         data.customerCash = customerCash;
-        data.expectedCash = parseFloat(data.openingCash || 0) + data.cashSales - cashExpenses + otherIncomesCash + customerCash;
+        data.cashPurchases = cashPurchases;
+        data.expectedCash = parseFloat(data.openingCash || 0) + data.cashSales - cashExpenses + otherIncomesCash + customerCash - cashPurchases;
         callback(data);
       });
     });
@@ -230,11 +236,11 @@ exports.close = (req, res) => {
         const totalExpenses = expTotals && !expErr ? parseFloat(expTotals.totalExpenses || 0) : parseFloat(receipt.totalExpenses || 0);
         const cashExpenses = expTotals && !expErr ? parseFloat(expTotals.cashExpenses || 0) : totalExpenses;
 
-        shiftCashExtras(dailyReceiptId, (oiErr, oiTotals, customerCash) => {
+        shiftCashExtras(dailyReceiptId, (oiErr, oiTotals, customerCash, cashPurchases) => {
           const otherIncomesCash = oiTotals && !oiErr ? (oiTotals.cashTotal || 0) : 0;
           const totalOtherIncomes = oiTotals && !oiErr ? (oiTotals.total || 0) : 0;
 
-          const expectedCash = openingCash + cashSales - cashExpenses + otherIncomesCash + customerCash;
+          const expectedCash = openingCash + cashSales - cashExpenses + otherIncomesCash + customerCash - cashPurchases;
           const closingCash = parseFloat(req.body.closingCash);
           const discrepancy = closingCash - expectedCash;
 
@@ -303,6 +309,7 @@ exports.close = (req, res) => {
                         totalOtherIncomes,
                         otherIncomesCash,
                         customerCash,
+                        cashPurchases,
                         expectedCash,
                         closingCash,
                         discrepancy,

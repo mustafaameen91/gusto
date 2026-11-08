@@ -175,6 +175,7 @@ const currentDate = computed(() => formatCurrentDateArabic())
 
 const filterBaristaItems = (order) => {
   if (!order?.items || !Array.isArray(order.items)) return null
+  order = { ...order, items: order.items.filter(item => !['cancelled', 'returned'].includes(item.status)) }
   const baristaItems = order.items.filter(item =>
     item.isKitchen === false || item.isKitchen === 0
   )
@@ -239,7 +240,10 @@ const updateOrderBaristaItems = async (orderId, status) => {
     const baristaItems = order.items.filter(item =>
       item.isKitchen === false || item.isKitchen === 0
     )
-    await Promise.all(baristaItems.map(item => orderItemAPI.updateStatus(item.idOrderItem, status)))
+    // Only live items that are behind the target status (never returned/cancelled ones)
+    const steps = ['pending', 'preparing', 'ready', 'completed']
+    const toUpdate = baristaItems.filter(item => steps.includes(item.status || 'pending') && steps.indexOf(item.status || 'pending') < steps.indexOf(status))
+    await Promise.all(toUpdate.map(item => orderItemAPI.updateStatus(item.idOrderItem, status)))
     await new Promise(r => setTimeout(r, 500))
     try {
       await orderAPI.recomputeStatus(orderId)

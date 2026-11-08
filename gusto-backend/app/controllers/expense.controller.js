@@ -138,10 +138,12 @@ exports.create = (req, res) => {
       expense.paidFromAccountId,
       expense.description || expense.category,
       req.userId,
-      expense.supplierId
+      expense.supplierId,
+      (errJe) => {
+        if (errJe) console.error('[expense] journal entry failed:', errJe.message);
+        res.json(data);
+      }
     );
-    
-    res.json(data);
   }));
   });
 };
@@ -265,10 +267,12 @@ function updateExpense(req, res) {
           expense.paidFromAccountId,
           expense.description || expense.category,
           req.userId,
-          expense.supplierId
+          expense.supplierId,
+          (errJe) => {
+            if (errJe) console.error('[expense] journal entry failed:', errJe.message);
+            res.json(data);
+          }
         );
-        
-        res.json(data);
       });
     });
   });
@@ -348,69 +352,56 @@ exports.getTotal = (req, res) => {
  *   Debit  -> expense account (from ExpenseCategory.defaultAccountId)
  *   Credit -> paid-from account (paidFromAccountId, e.g. cash)
  */
-function createExpenseJournalEntry(expenseId, expenseDate, amount, expenseCategoryId, paidFromAccountId, description, userId, supplierId) {
+function createExpenseJournalEntry(expenseId, expenseDate, amount, expenseCategoryId, paidFromAccountId, description, userId, supplierId, done = () => {}) {
+  // Entry, lines and the link back to the expense in one transaction, finished before the
+  // request is answered: shift close skips linked expenses, so a late link would post twice
   db.query(
     `SELECT ec.defaultAccountId, ps.apAccountId
      FROM ExpenseCategories ec LEFT JOIN PostingSettings ps ON ps.name = 'default'
      WHERE ec.idExpenseCategory = ?`,
     [expenseCategoryId],
     (err, rows) => {
-      if (err || !rows || rows.length === 0) {
-        console.error('[expense] Could not find expense category for journal entry:', expenseCategoryId, err);
-        return;
+      if (err || !rows || rows.length === 0 || !rows[0].defaultAccountId) {
+        return done(err || new Error(`expense category ${expenseCategoryId} has no account`));
       }
       // Paying a supplier settles what we owe them (the goods are already in stock),
       // so it debits the suppliers account instead of an expense account
-      const expenseAccountId = supplierId && rows[0].apAccountId ? rows[0].apAccountId : rows[0].defaultAccountId;
-      if (!expenseAccountId) {
-        console.error('[expense] Expense category has no defaultAccountId:', expenseCategoryId);
-        return;
-      }
-
+      const debitAccountId = supplierId && rows[0].apAccountId ? rows[0].apAccountId : rows[0].defaultAccountId;
       const memo = `مصروف: ${description || ''}`.trim();
-      db.query(
-        `INSERT INTO JournalEntries (entryDate, sourceType, status, memo, createdBy)
-         VALUES (?, 'EXPENSE', 'POSTED', ?, ?)`,
-        [expenseDate, memo, userId],
-        (errJe, jeRes) => {
-          if (errJe) {
-            console.error('[expense] Failed to create journal entry:', errJe);
-            return;
-          }
-          const journalEntryId = jeRes.insertId;
-          const lines = [
-            [journalEntryId, expenseAccountId, parseFloat(amount), 0, memo],
-            [journalEntryId, paidFromAccountId, 0, parseFloat(amount), memo]
-          ];
-          db.query(
-            `INSERT INTO JournalLines (journalEntryId, accountId, debit, credit, lineMemo) VALUES ?`,
-            [lines],
-            (errLines) => {
-              if (errLines) {
-                console.error('[expense] Failed to create journal lines:', errLines);
-                return;
-              }
-              // Link the journal entry to the expense for later reversal
-              db.query(
-                `UPDATE Expenses SET journalEntryId = ? WHERE idExpense = ?`,
-                [journalEntryId, expenseId],
-                (errLink) => {
-                  if (errLink) {
-                    console.warn('[expense] Could not link journalEntryId to expense (column may not exist yet):', errLink.code);
-                  }
+      db.getConnection((errConn, conn) => {
+        if (errConn) return done(errConn);
+        const fail = (e) => conn.rollback(() => { conn.release(); done(e); });
+        conn.beginTransaction((errTx) => {
+          if (errTx) { conn.release(); return done(errTx); }
+          conn.query(
+            `INSERT INTO JournalEntries (entryDate, sourceType, sourceId, status, memo, createdBy, postedBy, postedAt)
+             VALUES (?, 'EXPENSE', ?, 'POSTED', ?, ?, ?, NOW())`,
+            [expenseDate, expenseId, memo, userId, userId],
+            (e1, je) => {
+              if (e1) return fail(e1);
+              conn.query(
+                `INSERT INTO JournalLines (journalEntryId, accountId, debit, credit, lineMemo) VALUES ?`,
+                [[[je.insertId, debitAccountId, parseFloat(amount), 0, memo], [je.insertId, paidFromAccountId, 0, parseFloat(amount), memo]]],
+                (e2) => {
+                  if (e2) return fail(e2);
+                  conn.query("UPDATE Expenses SET journalEntryId = ? WHERE idExpense = ?", [je.insertId, expenseId], (e3) => {
+                    if (e3) return fail(e3);
+                    conn.commit((e4) => {
+                      if (e4) return fail(e4);
+                      conn.release();
+                      done(null);
+                    });
+                  });
                 }
               );
             }
           );
-        }
-      );
+        });
+      });
     }
   );
 }
 
-/**
- * Reverse (delete) the journal entry linked to an expense.
- */
 function reverseExpenseJournalEntry(expenseId, callback) {
   db.query(
     `SELECT journalEntryId FROM Expenses WHERE idExpense = ?`,

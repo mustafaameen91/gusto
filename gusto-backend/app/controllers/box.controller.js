@@ -120,7 +120,7 @@ exports.getBalance = (req, res) => {
         creditSales: shift.creditSales,
         totalExpenses: shift.totalExpenses,
         cashExpenses: shift.cashExpenses,
-        totalPurchases: 0,
+        totalPurchases: shift.cashPurchases,
         totalOtherIncomes: shift.totalOtherIncomes,
         otherIncomesCash: shift.otherIncomesCash,
         customerCash: shift.customerCash,

@@ -150,7 +150,9 @@ function postShift(dailyReceiptId, postedBy, result) {
                        FROM OrderItems oi
                        INNER JOIN MenuItems m ON oi.menuItemId = m.idMenuItem
                        INNER JOIN Categories c ON m.categoryId = c.idCategory
-                       WHERE oi.status NOT IN ('cancelled', 'returned')
+                       -- the order's original items: returned lines are refunded separately (posted
+                       -- below as returns), exchange replacements are posted as replacement revenue
+                       WHERE oi.status <> 'cancelled' AND COALESCE(oi.specialInstructions, '') <> 'بديل - إرجاع'
                        GROUP BY oi.orderId
                      ) x ON x.orderId = o.idOrder AND x.itemsValue > 0
                      WHERE o.dailyReceiptId = ? AND o.status != 'cancelled' AND o.saleType IN ('cash', 'credit')`,
@@ -220,8 +222,8 @@ function postShift(dailyReceiptId, postedBy, result) {
                           conn.query(
                         `SELECT COALESCE(SUM(it.totalCost), 0) AS totalCogs
                          FROM InventoryTransactions it
-                         INNER JOIN Orders o ON o.idOrder = it.orderId
-                         WHERE o.dailyReceiptId = ? AND it.transactionType = 'usage' AND it.totalCost IS NOT NULL`,
+                         LEFT JOIN Orders o ON o.idOrder = it.orderId
+                         WHERE COALESCE(it.dailyReceiptId, o.dailyReceiptId) = ? AND it.transactionType = 'usage' AND it.totalCost IS NOT NULL`,
                         [dailyReceiptId],
                         (errCogs, cogsRows) => {
                           if (errCogs) {
@@ -368,8 +370,11 @@ function postShift(dailyReceiptId, postedBy, result) {
                                           return;
                                         }
                                         conn.query(
-                                          `UPDATE JournalEntries SET status = 'POSTED', postedBy = ?, postedAt = NOW() WHERE idJournalEntry = ?`,
-                                          [postedBy, journalEntryId],
+                                          `UPDATE JournalEntries SET status = 'POSTED', postedBy = ?, postedAt = NOW() WHERE idJournalEntry = ?;
+                                           UPDATE DailyReceipts SET isClosed = TRUE, closedAt = NOW(), closedBy = ? WHERE idDailyReceipt = ?`,
+                                          // The shift closes in the same transaction as its posting, so nothing
+                                          // (order, return, payment, expense) can land in it after it was posted
+                                          [postedBy, journalEntryId, postedBy, dailyReceiptId],
                                           (errPost) => {
                                             if (errPost) {
                                               rollback(errPost);

@@ -23,9 +23,8 @@ function profitForPeriod(startDate, endDate, callback) {
       (SELECT COALESCE(SUM(ri.replacementPrice * ri.replacementQuantity), 0) FROM OrderReturnItems ri
         JOIN OrderReturns r ON r.idOrderReturn = ri.orderReturnId
         WHERE r.returnDate BETWEEN ? AND ? AND ri.replacementMenuItemId IS NOT NULL) AS replacements,
-      (SELECT COALESCE(SUM(it.totalCost), 0) FROM InventoryTransactions it
-        JOIN Orders o ON o.idOrder = it.orderId
-        WHERE it.transactionType = 'usage' AND o.orderDate BETWEEN ? AND ?) AS cogs,
+      (SELECT COALESCE(SUM(totalCost), 0) FROM InventoryTransactions
+        WHERE transactionType = 'usage' AND transactionDate BETWEEN ? AND ?) AS cogs,
       (SELECT COALESCE(SUM(amount), 0) FROM Expenses
         WHERE supplierId IS NULL AND expenseDate BETWEEN ? AND ?) AS operatingExpenses,
       (SELECT COALESCE(SUM(amount), 0) FROM OtherIncomes

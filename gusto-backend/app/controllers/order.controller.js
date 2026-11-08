@@ -13,7 +13,7 @@ const { LOCATION_BARISTA_INTERNAL } = require("../services/transfer.service");
 // ============================================================================
 // AUTO-DEDUCTION LOGIC - CRITICAL FEATURE
 // ============================================================================
-const deductInventoryForOrder = (orderId, orderItems, callback) => {
+const deductInventoryForOrder = (orderId, orderItems, callback, dailyReceiptId = null) => {
   const transactions = [];
   let processedItems = 0;
 
@@ -62,6 +62,7 @@ const deductInventoryForOrder = (orderId, orderItems, callback) => {
             costPerUnit: unitCost,
             totalCost: Math.round(quantityToDeduct * unitCost * 100) / 100,
             orderId: orderId,
+            dailyReceiptId,
             recordedBy: null,
             notes: `Auto-deduction for ${menuItem.itemName}${sizeNote} (Order #${orderId})`
           });
@@ -397,7 +398,7 @@ exports.create = async (req, res) => {
         }
 
         res.json(data);
-      });
+      }, openShift.idDailyReceipt);
     });
     });
   });

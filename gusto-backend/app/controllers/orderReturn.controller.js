@@ -1,5 +1,6 @@
 const db = require("../models/db");
 const { todayBusinessDate, businessWindow } = require("../services/businessDay");
+const { moveIngredients } = require("../services/recipeUsage");
 const OrderReturn = require("../models/orderReturn.model");
 
 // Self-healing: ensure tables exist
@@ -60,7 +61,7 @@ exports.create = (req, res) => {
   if (!orderId || !items || !Array.isArray(items) || items.length === 0) {
     return res.status(400).json({ message: "orderId and items[] are required." });
   }
-  const refundMethod = req.body.refundMethod === "credit" ? "credit" : "cash";
+  let refundMethod = req.body.refundMethod === "credit" ? "credit" : "cash";
   const round2 = (n) => Math.round(n * 100) / 100;
 
   db.getConnection((errConn, conn) => {
@@ -86,9 +87,11 @@ exports.create = (req, res) => {
         const [shift] = await q("SELECT idDailyReceipt FROM DailyReceipts WHERE isClosed = 0 ORDER BY idDailyReceipt DESC LIMIT 1");
         if (!shift) return fail(400, "يجب فتح الشفت أولاً قبل تسجيل الإرجاع", "NO_OPEN_SHIFT");
 
+        // A credit sale hasn't been paid: its refund always goes back to the customer's account
+        if (order.saleType === "credit") refundMethod = "credit";
         let customerId = null;
         if (refundMethod === "credit") {
-          customerId = Number(req.body.customerId) || order.customerId || null;
+          customerId = order.saleType === "credit" ? order.customerId : Number(req.body.customerId) || order.customerId || null;
           if (!customerId) return fail(400, "اختر العميل عند الإرجاع على الحساب");
         }
 
@@ -159,10 +162,19 @@ exports.create = (req, res) => {
             );
           }
           if (p.disposition === "returned_to_stock") {
-            await q(
-              "INSERT INTO KitchenItemStock (menuItemId, quantity) VALUES (?, ?) ON DUPLICATE KEY UPDATE quantity = quantity + ?",
-              [line.menuItemId, qty, qty]
-            );
+            // Back on the shelf: a kitchen portion for kitchen items, and its ingredients back in the store
+            const [cat] = await q("SELECT c.isKitchen FROM MenuItems m JOIN Categories c ON c.idCategory = m.categoryId WHERE m.idMenuItem = ?", [line.menuItemId]);
+            if (cat && cat.isKitchen) {
+              await q(
+                "INSERT INTO KitchenItemStock (menuItemId, quantity) VALUES (?, ?) ON DUPLICATE KEY UPDATE quantity = quantity + ?",
+                [line.menuItemId, qty, qty]
+              );
+            }
+            await moveIngredients(q, {
+              menuItemId: line.menuItemId, itemSizeId: line.itemSizeId, quantity: qty, direction: "restore",
+              orderId: order.idOrder, dailyReceiptId: shift.idDailyReceipt, userId: req.userId,
+              note: `Returned to stock (Order #${order.idOrder})`,
+            });
           }
           if (p.replacement) {
             const r = p.replacement;
@@ -175,6 +187,12 @@ exports.create = (req, res) => {
                VALUES (?, ?, ?, ?, ?, 'بديل - إرجاع', 'pending')`,
               [order.idOrder, r.menuItemId, r.sizeId, r.qty, r.price]
             );
+            // The replacement is made now: its ingredients count in this shift's cost of goods
+            await moveIngredients(q, {
+              menuItemId: r.menuItemId, itemSizeId: r.sizeId, quantity: r.qty, direction: "use",
+              orderId: order.idOrder, dailyReceiptId: shift.idDailyReceipt, userId: req.userId,
+              note: `Exchange replacement (Order #${order.idOrder})`,
+            });
           }
           await q(
             `INSERT INTO OrderReturnItems (orderReturnId, orderItemId, menuItemId, quantity, refundAmount, disposition,

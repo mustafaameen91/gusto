@@ -1,4 +1,5 @@
 const db = require("../models/db");
+const { moveIngredients } = require("./recipeUsage");
 
 const CANCEL_ROLES = ["admin", "supervisor"];
 const round2 = (n) => Math.round(n * 100) / 100;
@@ -74,34 +75,18 @@ function cancelOrderItems(orderId, itemIds, user, callback) {
                 [line.menuItemId, line.quantity, line.quantity]
               );
             }
-            const recipes = await q(
-              `SELECT r.ingredientId, r.quantityNeeded, r.sizeId, i.costPerUnit
-               FROM Recipes r JOIN Ingredients i ON i.idIngredient = r.ingredientId
-               WHERE r.menuItemId = ?`,
-              [line.menuItemId]
-            );
-            const sized = line.itemSizeId ? recipes.filter((r) => Number(r.sizeId) === Number(line.itemSizeId)) : [];
-            const used = sized.length ? sized : recipes.filter((r) => !r.sizeId);
-            for (const r of used) {
-              const qty = Number(r.quantityNeeded) * line.quantity;
-              const cost = round2(qty * Number(r.costPerUnit || 0));
-              await q(
-                `INSERT INTO InventoryTransactions (ingredientId, transactionType, quantity, costPerUnit, totalCost, orderId, recordedBy, notes)
-                 VALUES (?, 'usage', ?, ?, ?, ?, ?, ?)`,
-                [r.ingredientId, qty, r.costPerUnit, -cost, orderId, user.id, `Cancelled item (Order #${orderId})`]
-              );
-              await q(
-                `INSERT INTO IngredientStock (ingredientId, locationId, quantity) VALUES (?, 2, ?)
-                 ON DUPLICATE KEY UPDATE quantity = quantity + ?`,
-                [r.ingredientId, qty, qty]
-              );
-            }
+            await moveIngredients(q, {
+              menuItemId: line.menuItemId, itemSizeId: line.itemSizeId, quantity: line.quantity,
+              direction: "restore", orderId, dailyReceiptId: order.dailyReceiptId, userId: user.id,
+              note: `Cancelled item (Order #${orderId})`,
+            });
           }
         }
 
         const newTotal = Math.max(0, round2(total - netCancelled));
         const newDiscount = Math.max(0, round2(discount - discountCancelled));
-        const remaining = lines.length - toCancel.length - lines.filter((l) => ["cancelled", "returned"].includes(l.status)).length;
+        // Returned lines were served and refunded separately: they keep the order alive
+        const remaining = lines.length - toCancel.length - lines.filter((l) => l.status === "cancelled").length;
         const orderStatus = remaining <= 0 ? "cancelled" : order.status;
         await q(
           `UPDATE Orders SET totalAmount = ?, discount = ?, status = ?${orderStatus === "cancelled" ? ", cancelledAt = NOW()" : ""} WHERE idOrder = ?`,

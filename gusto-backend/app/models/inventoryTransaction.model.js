@@ -34,13 +34,14 @@ InventoryTransaction.bulkCreate = (transactions, result) => {
     t.costPerUnit || null,
     t.totalCost || null,
     t.orderId || null,
+    t.dailyReceiptId || null,
     t.recordedBy || null,
     t.notes || null
   ]);
 
   db.query(
     `INSERT INTO InventoryTransactions 
-    (ingredientId, transactionType, quantity, costPerUnit, totalCost, orderId, recordedBy, notes) 
+    (ingredientId, transactionType, quantity, costPerUnit, totalCost, orderId, dailyReceiptId, recordedBy, notes)
     VALUES ?`,
     [transactionsData],
     (err, res) => {

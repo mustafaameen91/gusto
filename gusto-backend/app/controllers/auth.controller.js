@@ -4,57 +4,27 @@ const jwt = require("jsonwebtoken");
 const Staff = require("../models/staff.model");
 
 exports.login = (req, res) => {
-  console.log("\n🔐 ===== LOGIN ATTEMPT =====");
-  console.log("📧 Email received:", req.body.email);
-  
   if (!req.body.email || !req.body.password) {
-    console.log("❌ Missing email or password");
     return res.status(400).json({
-      message: "Email and password are required!"
+      message: "البريد الإلكتروني وكلمة المرور مطلوبان"
     });
   }
+  // Same answer for an unknown email and a wrong password, so logins don't reveal which emails exist
+  const badLogin = () => res.status(401).json({ message: "البريد الإلكتروني أو كلمة المرور غير صحيحة" });
 
   Staff.findByEmail(req.body.email, (err, staff) => {
     if (err) {
-      console.error("❌ Database error:", err);
-      if (err.kind === "not_found") {
-        console.log("❌ User NOT FOUND in database");
-        return res.status(404).json({
-          message: "User not found!"
-        });
-      }
-      return res.status(500).json({
-        message: err.message || "Error retrieving user.",
-        error: process.env.NODE_ENV === 'development' ? err.message : undefined
-      });
+      if (err.kind === "not_found") return badLogin();
+      console.error("[auth] login lookup failed:", err.message);
+      return res.status(500).json({ message: "Error retrieving user." });
     }
 
-    console.log("✅ User found in database:");
-    console.log("   ID:", staff.idStaff);
-    console.log("   Email:", staff.email);
-    console.log("   Role:", staff.role);
-    console.log("   Active:", staff.isActive);
-
-    // Check if staff is active
-    if (!staff.isActive) {
-      console.log("❌ User account is INACTIVE");
-      return res.status(403).json({
-        message: "Your account has been deactivated!"
-      });
-    }
-
-    // Verify password
-    console.log("🔐 Comparing passwords...");
-    
     const passwordIsValid = bcrypt.compareSync(req.body.password, staff.password);
-    
-    console.log("🔐 Password comparison result:", passwordIsValid ? "✅ MATCH" : "❌ NO MATCH");
+    if (!passwordIsValid) return badLogin();
 
-    if (!passwordIsValid) {
-      console.log("❌ LOGIN FAILED: Invalid password!");
-      console.log("===========================\n");
-      return res.status(401).json({
-        message: "Invalid password!"
+    if (!staff.isActive) {
+      return res.status(403).json({
+        message: "الحساب غير فعّال. يرجى مراجعة الإدارة."
       });
     }
 
@@ -64,7 +34,7 @@ exports.login = (req, res) => {
         id: staff.idStaff, 
         role: staff.role 
       },
-      process.env.JWT_SECRET || "gusto-secret-key",
+      process.env.JWT_SECRET,
       { expiresIn: 86400 } // 24 hours
     );
 
@@ -76,9 +46,6 @@ exports.login = (req, res) => {
     });
 
     // Return user info and token (without password)
-    console.log("✅ LOGIN SUCCESSFUL!");
-    console.log("🎫 Token generated");
-    console.log("===========================\n");
     
     res.json({
       message: "Login successful",

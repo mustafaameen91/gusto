@@ -233,9 +233,11 @@ Purchase.receive = (id, receivedItems, receivedBy, result) => {
                 const purchase = purchaseRows[0];
                 const memo = `استلام أمر شراء ${purchase.purchaseNumber || "#" + id}`;
                 connection.query(
-                  `INSERT INTO JournalEntries (entryDate, sourceType, sourceId, status, memo, createdBy, postedBy, postedAt)
-                   VALUES (NOW(), 'PURCHASE_RECEIPT', ?, 'POSTED', ?, ?, ?, NOW())`,
-                  [id, memo, receivedBy, receivedBy],
+                  // A cash purchase is paid from the open shift's drawer: link it to that shift
+                  `INSERT INTO JournalEntries (entryDate, sourceType, sourceId, status, memo, createdBy, postedBy, postedAt, dailyReceiptId)
+                   VALUES (NOW(), 'PURCHASE_RECEIPT', ?, 'POSTED', ?, ?, ?, NOW(),
+                     IF(? = 'cash', (SELECT idDailyReceipt FROM DailyReceipts WHERE isClosed = 0 ORDER BY idDailyReceipt DESC LIMIT 1), NULL))`,
+                  [id, memo, receivedBy, receivedBy, purchase.paymentType],
                   (err, je) => {
                     if (err) return fail(err);
                     connection.query(

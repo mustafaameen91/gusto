@@ -37,8 +37,14 @@ OrderItem.updateStatus = (id, status, preparedBy, result) => {
   
   console.log(`[OrderItem.updateStatus] Updating item ${id} to status: ${status}`);
   
+  // Kitchen statuses only move forward, and cancelled/returned lines are never touched
+  // (cancelling goes through the cancellation service, returns through the returns flow)
+  params.push(status);
   db.query(
-    `UPDATE OrderItems SET ${updateFields} WHERE idOrderItem = ?`,
+    `UPDATE OrderItems SET ${updateFields}
+     WHERE idOrderItem = ?
+       AND status IN ('pending', 'preparing', 'ready', 'completed')
+       AND FIELD(status, 'pending', 'preparing', 'ready', 'completed') < FIELD(?, 'pending', 'preparing', 'ready', 'completed')`,
     params,
     (err, res) => {
       if (err) {
@@ -47,8 +53,8 @@ OrderItem.updateStatus = (id, status, preparedBy, result) => {
         return;
       }
       if (res.affectedRows == 0) {
-        console.warn(`[OrderItem.updateStatus] Item ${id} not found`);
-        result({ kind: "not_found" }, null);
+        // Already at or past this status, or cancelled/returned: nothing to do
+        result(null, { unchanged: true });
         return;
       }
       console.log(`[OrderItem.updateStatus] Item ${id} updated successfully to ${status}`);
@@ -87,71 +93,30 @@ OrderItem.findById = (id, result) => {
   });
 };
 
-// Compute overall order status from items
+// Compute overall order status from its live lines (cancelled and returned lines are done with)
 OrderItem.computeOrderStatus = (orderId, result) => {
   const query = `
-    SELECT 
-      COUNT(*) as totalItems,
-      SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) as pendingCount,
-      SUM(CASE WHEN status = 'preparing' THEN 1 ELSE 0 END) as preparingCount,
-      SUM(CASE WHEN status = 'ready' THEN 1 ELSE 0 END) as readyCount,
-      SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as completedCount,
-      SUM(CASE WHEN status = 'cancelled' THEN 1 ELSE 0 END) as cancelledCount
+    SELECT
+      COUNT(*) AS totalItems,
+      SUM(status = 'cancelled') AS cancelledCount,
+      SUM(status NOT IN ('cancelled', 'returned')) AS liveCount,
+      SUM(status = 'preparing') AS preparingCount,
+      SUM(status = 'ready') AS readyCount,
+      SUM(status = 'completed') AS completedCount
     FROM OrderItems
     WHERE orderId = ?
   `;
-  
   db.query(query, [orderId], (err, res) => {
-    if (err) {
-      result(err, null);
-      return;
-    }
-    
-    if (res.length === 0 || res[0].totalItems === 0) {
-      result(null, 'pending');
-      return;
-    }
-    
-    const stats = res[0];
-    
-    // Convert counts to numbers (MySQL SUM returns strings/decimals)
-    const totalItems = parseInt(stats.totalItems) || 0;
-    const pendingCount = parseInt(stats.pendingCount) || 0;
-    const preparingCount = parseInt(stats.preparingCount) || 0;
-    const readyCount = parseInt(stats.readyCount) || 0;
-    const completedCount = parseInt(stats.completedCount) || 0;
-    const cancelledCount = parseInt(stats.cancelledCount) || 0;
-    
-    // Debug logging
-    console.log(`[computeOrderStatus] Order ${orderId} - Items: total=${totalItems}, pending=${pendingCount}, preparing=${preparingCount}, ready=${readyCount}, completed=${completedCount}, cancelled=${cancelledCount}`);
-    
-    // Determine overall status based on item statuses
-    // Priority: cancelled > completed > ready > preparing > pending
-    let overallStatus = 'pending';
-    
-    // Check if all items are cancelled
-    if (cancelledCount === totalItems && totalItems > 0) {
-      overallStatus = 'cancelled';
-    }
-    // Check if all items are completed
-    else if (completedCount === totalItems && totalItems > 0) {
-      overallStatus = 'completed';
-    }
-    // Check if all items are ready (and none are cancelled)
-    else if (readyCount === totalItems && totalItems > 0 && cancelledCount === 0) {
-      overallStatus = 'ready';
-    }
-    // If any items are preparing, ready, or completed (but not all completed), status is preparing
-    else if (preparingCount > 0 || readyCount > 0 || completedCount > 0) {
-      overallStatus = 'preparing';
-    }
-    // If all items are pending
-    else if (pendingCount === totalItems && totalItems > 0) {
-      overallStatus = 'pending';
-    }
-    
-    console.log(`[computeOrderStatus] Order ${orderId} - Computed status: ${overallStatus}`);
-    result(null, overallStatus);
+    if (err) return result(err, null);
+    const n = (k) => parseInt(res[0]?.[k] || 0, 10);
+    const total = n("totalItems"), live = n("liveCount");
+    let status = "pending";
+    if (total > 0 && n("cancelledCount") === total) status = "cancelled";
+    else if (live === 0 && total > 0) status = "completed"; // everything returned or cancelled after serving
+    else if (n("completedCount") === live) status = "completed";
+    else if (n("readyCount") + n("completedCount") === live) status = "ready";
+    else if (n("preparingCount") + n("readyCount") + n("completedCount") > 0) status = "preparing";
+    result(null, status);
   });
 };
 
